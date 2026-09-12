@@ -36,6 +36,8 @@ pub struct StepRecord {
     pub review: StepReview,
     /// 是否经历了一次重试。
     pub retried: bool,
+    /// 重试是否使用了规划器修订后的步骤（false 表示按原步骤重试）。
+    pub revised: bool,
 }
 
 /// 任务执行结果。
@@ -111,17 +113,20 @@ impl<'a> TaskRunner<'a> {
     fn run_step(&self, goal: &str, step: &PlanStep) -> StepRecord {
         let mut attempt = 0usize;
         let mut retried = false;
+        let mut revised = false;
+        // 当前生效的步骤：重试时可能被规划器修订后替换
+        let mut current = step.clone();
         loop {
-            let (result, tool_error) = match &step.tool {
+            let (result, tool_error) = match &current.tool {
                 None => {
                     // 纯回答步骤：expected 即输出
-                    (step.expected.clone(), false)
+                    (current.expected.clone(), false)
                 }
                 Some(tool_name) => {
-                    let args = if step.args.is_null() {
+                    let args = if current.args.is_null() {
                         serde_json::json!({})
                     } else {
-                        step.args.clone()
+                        current.args.clone()
                     };
                     match execute_tool(&self.ctx, tool_name, &args) {
                         Ok(v) => (v.to_string(), false),
@@ -132,7 +137,7 @@ impl<'a> TaskRunner<'a> {
 
             let review = self
                 .reflector
-                .review_step(goal, step, &result, tool_error)
+                .review_step(goal, &current, &result, tool_error)
                 .unwrap_or_else(|_| StepReview {
                     success: !tool_error,
                     summary: "评审不可用，按执行层判定".to_string(),
@@ -142,21 +147,46 @@ impl<'a> TaskRunner<'a> {
 
             if review.success || attempt >= self.max_retries || !review.should_retry {
                 return StepRecord {
-                    title: step.title.clone(),
-                    tool: step.tool.clone(),
+                    title: current.title.clone(),
+                    tool: current.tool.clone(),
                     ok: review.success,
                     result,
                     review,
                     retried,
+                    revised,
                 };
             }
 
-            // 失败且评审建议重试
+            // 失败且评审建议重试：先请规划器依据失败原因与建议修订单步，
+            // 修订不可用时按原步骤重试（重试必定发生）。
             attempt += 1;
             retried = true;
+            let failure = result.clone();
+            match self
+                .planner
+                .revise_step(goal, &current, &failure, &review.advice)
+            {
+                Some(next) => {
+                    tracing::info!(
+                        from = %current.title,
+                        to = %next.title,
+                        "步骤已按反思建议修订，重试使用修订后的步骤"
+                    );
+                    current = next;
+                    revised = true;
+                }
+                None => {
+                    // 保持 current 不变，按原步骤重试
+                }
+            }
             let _ = self.remember_event(
                 "reflection",
-                &format!("步骤「{}」失败将重试: {}", step.title, review.summary),
+                &format!(
+                    "步骤「{}」失败将重试（{}）: {}",
+                    step.title,
+                    if revised { "已修订" } else { "原步骤" },
+                    review.summary
+                ),
                 0.2,
             );
         }
@@ -202,7 +232,6 @@ mod tests {
     use crate::native::model::ChatMessage;
     use crate::paths::AgentDirs;
     use crate::permissions::PermissionStore;
-    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// 按调用序号取回复的假模型。
@@ -222,6 +251,10 @@ mod tests {
         fn chat(&self, _m: &[ChatMessage], _t: f64) -> AppResult<String> {
             let mut q = self.replies.lock().unwrap();
             self.calls.fetch_add(1, Ordering::SeqCst);
+            if q.is_empty() {
+                // 脚本耗尽 = 模拟模型不可用（供兜底路径测试使用）
+                return Err(crate::error::AppError::Other("脚本耗尽".to_string()));
+            }
             Ok(q.remove(0))
         }
         fn name(&self) -> &str {
@@ -318,9 +351,51 @@ mod tests {
         let (_t, dirs, perms, memory) = setup("retry");
         let file = dirs.workspace.join("later.txt");
         // 第一次工具执行时文件不存在 → 报错；评审建议重试；
-        // 在评审回调间隙无法直接干预文件系统，改为：
-        // 预先用一个"延迟出现"技巧——重试前文件仍不存在，第二次也失败，
-        // 断言恰好执行了 2 次工具调用（1 次原始 + 1 次重试）。
+        // 重试前规划器给出修订步骤（降级为说明步骤）→ 第二次执行仍被判失败。
+        // 断言：恰好 5 次模型调用（plan / review / revise / review / summarize），
+        // 且重试使用了修订后的步骤。
+        let plan = serde_json::json!({
+            "goal": "读文件",
+            "steps": [
+                {"title": "读文件", "tool": "read_text_file",
+                 "args": {"path": file.display().to_string()}, "expected": "内容"}
+            ]
+        })
+        .to_string();
+        let review_retry = serde_json::json!({
+            "success": false, "summary": "暂时不可用", "shouldRetry": true, "advice": "换一种方式"
+        })
+        .to_string();
+        let revised_step = serde_json::json!({
+            "title": "说明文件缺失", "tool": null, "args": null,
+            "expected": "目标文件不存在，建议先创建它"
+        })
+        .to_string();
+        let review_fail = serde_json::json!({
+            "success": false, "summary": "仍失败", "shouldRetry": false, "advice": ""
+        })
+        .to_string();
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            plan,
+            review_retry,
+            revised_step,
+            review_fail,
+            "最终失败。".to_string(),
+        ]));
+        let ctx = ToolContext { perms: &perms, dirs: &dirs };
+        let runner = TaskRunner::new(provider.clone(), ctx, &memory);
+        let outcome = runner.run("读文件", "").unwrap();
+        assert!(!outcome.success);
+        assert!(outcome.steps[0].retried, "应发生一次重试");
+        assert!(outcome.steps[0].revised, "重试应使用修订后的步骤");
+        assert_eq!(outcome.steps[0].title, "说明文件缺失", "记录应反映修订后的步骤");
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 5);
+    }
+
+    #[test]
+    fn retry_falls_back_to_original_step_when_revision_invalid() {
+        let (_t, dirs, perms, memory) = setup("retry_fallback");
+        let file = dirs.workspace.join("never.txt");
         let plan = serde_json::json!({
             "goal": "读文件",
             "steps": [
@@ -337,9 +412,11 @@ mod tests {
             "success": false, "summary": "仍失败", "shouldRetry": false, "advice": ""
         })
         .to_string();
+        // 第 3 次调用是修订请求，故意给不可解析的输出 → 回退为原步骤重试
         let provider = Arc::new(ScriptedProvider::new(vec![
             plan,
             review_retry,
+            "这不是 JSON".to_string(),
             review_fail,
             "最终失败。".to_string(),
         ]));
@@ -347,9 +424,10 @@ mod tests {
         let runner = TaskRunner::new(provider.clone(), ctx, &memory);
         let outcome = runner.run("读文件", "").unwrap();
         assert!(!outcome.success);
-        assert!(outcome.steps[0].retried, "应发生一次重试");
-        // plan(1) + review(2) + review(重试后) + summarize(1) = 4 次模型调用
-        assert_eq!(provider.calls.load(Ordering::SeqCst), 4);
+        assert!(outcome.steps[0].retried);
+        assert!(!outcome.steps[0].revised, "修订无效时应按原步骤重试");
+        assert_eq!(outcome.steps[0].title, "读文件");
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 5);
     }
 
     #[test]
@@ -360,29 +438,13 @@ mod tests {
             "steps": [{"title": "说明", "tool": null, "expected": "这是一个回答步骤"}]
         })
         .to_string();
-        // plan → summarize(抛错)：脚本耗尽时 ScriptedProvider 会 panic(remove on empty)
-        // 因此给 summarize 一个显式失败场景：用返回 Err 的模型
-        struct ErrProvider;
-        impl ModelProvider for ErrProvider {
-            fn chat(&self, _m: &[ChatMessage], _t: f64) -> AppResult<String> {
-                Err(crate::error::AppError::Other("网络断了".to_string()))
-            }
-            fn name(&self) -> &str {
-                "err"
-            }
-        }
-        // 但 ErrProvider 无法输出计划……组合：先 Scripted 给 plan+review，
-        // 总结由另一个 ErrProvider 承担不可行（TaskRunner 只持一个 provider）。
-        // 退而求其次：验证纯回答步骤全程不需要工具，总结失败走兜底拼接。
-        let provider = Arc::new(ScriptedProvider::new(vec![
-            plan,
-            "总结失败时也应拼接摘要".to_string(),
-        ]));
+        // 只给 plan 的回复：总结那次调用脚本耗尽 → 模型不可用 → 走兜底拼接
+        let provider = Arc::new(ScriptedProvider::new(vec![plan]));
         let ctx = ToolContext { perms: &perms, dirs: &dirs };
         let runner = TaskRunner::new(provider, ctx, &memory);
         let outcome = runner.run("纯说明任务", "").unwrap();
         assert!(outcome.success);
-        assert!(!outcome.summary.is_empty());
-        let _ = PathBuf::new(); // 保持导入
+        // 兜底文案形如「共 1 步，…」
+        assert!(outcome.summary.contains("共 1 步"), "应走兜底拼接: {}", outcome.summary);
     }
 }

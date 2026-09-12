@@ -113,6 +113,121 @@ impl Planner {
             }
         }
     }
+
+    /// 依据失败原因与反思建议修订单个步骤（执行器重试前调用）。
+    ///
+    /// 返回 `Some(修订步骤)` 表示模型给出了可用的修正；模型不可用或
+    /// 输出无效时返回 `None`，调用方按原步骤重试——保证"重试一定会
+    /// 发生"这一确定性不被模型故障破坏。
+    pub fn revise_step(
+        &self,
+        goal: &str,
+        step: &PlanStep,
+        failure: &str,
+        advice: &str,
+    ) -> Option<PlanStep> {
+        let tools_desc = TOOLS
+            .iter()
+            .map(|t| format!("- {}: {} 参数: {}", t.name, t.description, t.args_schema))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let system = format!(
+            "你是 DeepHarness 桌面 Agent 的规划器。某一步执行失败，请修订该步骤使其可执行成功。\n\
+             可用工具：\n{tools_desc}\n\
+             只输出一个 JSON 对象，格式：\n\
+             {{\"title\": string, \"tool\": string|null, \"args\": object|null, \"expected\": string}}\n\
+             规则：\n\
+             1. 只修订这一个步骤，不要输出整个计划。\n\
+             2. 失败源于参数错误时修正 args（例如改用正确的绝对路径）；该步骤确实无法完成时，\n\
+                可降级为 tool 为 null 的说明步骤，并在 expected 中说明原因。\n\
+             3. 不要编造不存在的工具；路径必须是绝对路径。\n\
+             4. 只输出 JSON，不要输出其它文字或代码围栏。"
+        );
+
+        let user_msg = format!(
+            "目标：{goal}\n原步骤：{}\n失败原因：{}\n反思建议：{}",
+            serde_json::to_string(step).unwrap_or_else(|_| "{}".to_string()),
+            if failure.trim().is_empty() { "（无）" } else { failure },
+            if advice.trim().is_empty() { "（无）" } else { advice },
+        );
+
+        let messages = [
+            ChatMessage::system(system),
+            ChatMessage::user(user_msg),
+        ];
+
+        let raw = match self.provider.chat(&messages, 0.1) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(error = %e, "步骤修订调用失败，按原步骤重试");
+                return None;
+            }
+        };
+        match parse_step_json(&raw) {
+            Ok(step) => Some(step),
+            Err(e) => {
+                tracing::warn!(error = %e, "步骤修订输出无效，按原步骤重试");
+                None
+            }
+        }
+    }
+}
+
+/// 解析"单个步骤 JSON"（reviser 的输出）：剥离围栏后按步骤规则校验。
+pub fn parse_step_json(raw: &str) -> AppResult<PlanStep> {
+    let json_text = extract_json(raw)?;
+    let value: serde_json::Value = serde_json::from_str(&json_text)
+        .map_err(|e| AppError::Other(format!("修订步骤不是合法 JSON: {e}")))?;
+    parse_step_value(&value, 0)
+}
+
+/// 校验并转换单个步骤的 JSON 值（`index` 仅用于错误信息，从 0 起）。
+fn parse_step_value(sv: &serde_json::Value, index: usize) -> AppResult<PlanStep> {
+    let title = sv
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::Other(format!("第 {} 步缺少 title", index + 1)))?;
+    let tool = match sv.get("tool") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(name)) => {
+            let name = name.trim().to_string();
+            if name.is_empty() {
+                None
+            } else {
+                // 工具必须在注册表中，防止模型发明工具
+                if crate::native::tools::find_tool(&name).is_none() {
+                    return Err(AppError::Other(format!(
+                        "第 {} 步引用了未知工具: {name}",
+                        index + 1
+                    )));
+                }
+                Some(name)
+            }
+        }
+        Some(_) => {
+            return Err(AppError::Other(format!(
+                "第 {} 步的 tool 必须是字符串或 null",
+                index + 1
+            )));
+        }
+    };
+    let args = sv.get("args").cloned().unwrap_or(serde_json::Value::Null);
+    let expected = sv
+        .get("expected")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if tool.is_some() && args.is_null() {
+        return Err(AppError::Other(format!(
+            "第 {} 步是工具步骤但缺少 args",
+            index + 1
+        )));
+    }
+    Ok(PlanStep { title, tool, args, expected })
 }
 
 /// 解析并校验模型输出的计划 JSON。
@@ -146,50 +261,7 @@ pub fn parse_plan(raw: &str) -> AppResult<Plan> {
 
     let mut steps = Vec::with_capacity(steps_value.len());
     for (i, sv) in steps_value.iter().enumerate() {
-        let title = sv
-            .get("title")
-            .and_then(|v| v.as_str())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| AppError::Other(format!("第 {} 步缺少 title", i + 1)))?;
-        let tool = match sv.get("tool") {
-            None | Some(serde_json::Value::Null) => None,
-            Some(serde_json::Value::String(name)) => {
-                let name = name.trim().to_string();
-                if name.is_empty() {
-                    None
-                } else {
-                    // 工具必须在注册表中，防止模型发明工具
-                    if crate::native::tools::find_tool(&name).is_none() {
-                        return Err(AppError::Other(format!(
-                            "第 {} 步引用了未知工具: {name}",
-                            i + 1
-                        )));
-                    }
-                    Some(name)
-                }
-            }
-            Some(_) => {
-                return Err(AppError::Other(format!(
-                    "第 {} 步的 tool 必须是字符串或 null",
-                    i + 1
-                )));
-            }
-        };
-        let args = sv.get("args").cloned().unwrap_or(serde_json::Value::Null);
-        let expected = sv
-            .get("expected")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if tool.is_some() && args.is_null() {
-            return Err(AppError::Other(format!(
-                "第 {} 步是工具步骤但缺少 args",
-                i + 1
-            )));
-        }
-        steps.push(PlanStep { title, tool, args, expected });
+        steps.push(parse_step_value(sv, i)?);
     }
 
     Ok(Plan { goal, steps })
@@ -334,5 +406,63 @@ mod tests {
     fn empty_goal_rejected_before_calling_model() {
         let p = Planner::new(std::sync::Arc::new(FakeProvider::new(vec![])));
         assert!(p.make_plan("   ", "").is_err());
+    }
+
+    fn sample_step() -> PlanStep {
+        PlanStep {
+            title: "读文件".to_string(),
+            tool: Some("read_text_file".to_string()),
+            args: serde_json::json!({"path": "C:/ws/missing.txt"}),
+            expected: "文件内容".to_string(),
+        }
+    }
+
+    #[test]
+    fn revise_step_returns_corrected_step() {
+        let revised = serde_json::json!({
+            "title": "写新文件", "tool": "write_text_file",
+            "args": {"path": "C:/ws/new.txt", "contents": "hi"},
+            "expected": "新文件已创建"
+        })
+        .to_string();
+        let p = Planner::new(std::sync::Arc::new(FakeProvider::new(vec![revised])));
+        let out = p
+            .revise_step("整理工作区", &sample_step(), "路径不存在", "改为写入新文件")
+            .expect("应给出修订步骤");
+        assert_eq!(out.title, "写新文件");
+        assert_eq!(out.tool.as_deref(), Some("write_text_file"));
+        assert_eq!(out.args["path"], "C:/ws/new.txt");
+    }
+
+    #[test]
+    fn revise_step_degrades_to_none_on_failure() {
+        // 模型调用直接报错（脚本为空）→ None，调用方按原步骤重试
+        let p = Planner::new(std::sync::Arc::new(FakeProvider::new(vec![])));
+        assert!(p
+            .revise_step("g", &sample_step(), "boom", "advice")
+            .is_none());
+    }
+
+    #[test]
+    fn revise_step_rejects_invalid_output() {
+        // 输出引用了不存在的工具 → None（不污染执行流程）
+        let bad = serde_json::json!({
+            "title": "乱来", "tool": "warp_drive", "args": {}, "expected": "x"
+        })
+        .to_string();
+        let p = Planner::new(std::sync::Arc::new(FakeProvider::new(vec![bad])));
+        assert!(p.revise_step("g", &sample_step(), "boom", "").is_none());
+    }
+
+    #[test]
+    fn parse_step_json_strips_fence_and_validates() {
+        let raw = format!(
+            "修订如下：\n```json\n{}\n```",
+            serde_json::json!({"title": "t", "tool": null, "expected": "说明"})
+        );
+        let step = parse_step_json(&raw).unwrap();
+        assert_eq!(step.tool, None);
+        assert_eq!(step.expected, "说明");
+        assert!(parse_step_json("完全不是 JSON").is_err());
     }
 }
