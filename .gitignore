@@ -14,17 +14,17 @@ node-win.zip
 # 直接失败，任何人 clone 后都编不过。
 resources/*
 !resources/README.md
-starcore-target/
 dsh-pkg.zip
 .npm-cache/
 *.log
 .DS_Store
 
-StarCore_*.exe
-
-StarCore-*.zip
-DeepSeek *.exe
+# 构建产物若被手动拷到根目录，不要误提交
+*-setup.exe
+*-setup.zip
+# 第三方商标与图形一律不入库（本项目不宣称官方隶属关系）
 deepseek-logo.png
+deepseek-*.svg
 
 # 密钥与环境变量严禁入库
 .env

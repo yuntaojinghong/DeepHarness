@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DeepSeek Harness Desktop — 开源跨平台 DeepSeek AI 桌面工作台</title>
-  <meta name="description" content="DeepSeek Harness Desktop：开箱即用的 DeepSeek AI 桌面工作台。流式对话、Agent 工具调用、官方模型实时同步、便携模式。基于 Tauri 2 + React + TypeScript。" />
-  <meta name="keywords" content="DeepSeek, AI, desktop, Tauri, React, TypeScript, LLM, agent, 桌面应用" />
-  <meta property="og:title" content="DeepSeek Harness Desktop" />
-  <meta property="og:description" content="开源跨平台 DeepSeek AI 桌面工作台" />
+  <title>DeepHarness — 三个相互隔离的 AI Agent 桌面工作台</title>
+  <meta name="description" content="DeepHarness：把三个相互隔离的 AI 编程 Agent 收进一个桌面工作台 —— DeepSeek Harness、Codex 与自研多步规划 Agent，目录 / 配置 / 权限白名单 / 插件作用域各自独立。附插件系统与逐 Agent 权限模型，纯本地、零遥测。" />
+  <meta name="keywords" content="DeepHarness, DeepSeek, Agent, 插件系统, 权限白名单, Tauri, Rust, React, TypeScript, LLM, 桌面应用, 开源" />
+  <meta property="og:title" content="DeepHarness — 三个相互隔离的 AI Agent 桌面工作台" />
+  <meta property="og:description" content="三个进程 / 目录 / 权限 / 插件作用域全隔离的 AI Agent，一个 Tauri 桌面应用。纯本地、零遥测、MIT 开源。" />
   <meta property="og:type" content="website" />
-  <link rel="icon" type="image/svg+xml" href="whale.svg" />
+  <link rel="icon" type="image/svg+xml" href="logo.svg" />
   <style>
     :root {
       --bg: #070b16;
@@ -256,10 +256,11 @@
   <nav>
     <div class="wrap nav-inner">
       <a class="nav-brand" href="#top">
-        <img src="whale.svg" alt="DeepSeek 鲸鱼标志" />
-        DeepSeek Harness Desktop
+        <img src="logo.svg" alt="DeepHarness 标志" />
+        DeepHarness
       </a>
       <div class="nav-links">
+        <a href="#agents">三个 Agent</a>
         <a href="#features">特性</a>
         <a href="#preview">预览</a>
         <a href="#install">安装</a>
@@ -271,21 +272,48 @@
 
   <header class="hero wrap" id="top">
     <div>
-      <h1>DeepSeek Harness<br /><span class="accent">桌面版</span></h1>
-      <p>开箱即用的 DeepSeek AI 桌面工作台：流式对话、Agent 工具调用、官方模型实时同步、便携模式。双击即用，数据全本地存储，零遥测。</p>
+      <h1>三个 Agent<br /><span class="accent">互不干扰</span></h1>
+      <p>把 DeepSeek Harness、Codex 与自研多步规划 Agent 收进一个桌面工作台：进程、工作区、会话、配置、日志与插件作用域<b>各自独立</b>，一个崩溃不影响其余两个。小白零配置可用，数据全本地，零遥测，MIT 开源。</p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="https://github.com/yuntaojinghong/DeepHarness/releases" target="_blank" rel="noopener">
-          下载 Windows 版
+        <a class="btn btn-primary" href="https://github.com/yuntaojinghong/DeepHarness/releases/download/v1.0.0-alpha.1/DeepHarness_1.0.0-alpha.1_x64-setup.exe">
+          下载 Windows 安装包
         </a>
         <a class="btn btn-outline" href="https://github.com/yuntaojinghong/DeepHarness" target="_blank" rel="noopener">
           查看源码
         </a>
       </div>
+      <p style="margin-top:14px;font-size:13px;color:var(--muted);">v1.0.0-alpha.1 · Windows x64 · 安装包已内置随包 Node 与 dsh，装完即可用</p>
     </div>
     <div class="hero-visual">
-      <div class="app-badge"><img src="whale.svg" alt="DeepSeek Harness 应用图标" /></div>
+      <div class="app-badge"><img src="logo.svg" alt="DeepHarness 应用图标" /></div>
     </div>
   </header>
+
+  <section id="agents">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>三个相互隔离的 Agent</h2>
+        <p>不是三个标签页，是三条独立的运行时</p>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg></div>
+          <h3>DeepSeek Harness</h3>
+          <p>内置官方 <code>dsh</code> CLI，一键拉起其本地 Web UI。官方 Web UI 需要一次性 token，由后端解析并<b>脱敏为 <code>token=***</code></b> 后再打开系统浏览器，不落日志。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 6-6 6 6 6M16 6l6 6-6 6"/></svg></div>
+          <h3>Codex</h3>
+          <p>使用系统 <code>codex</code> CLI，按需拉起、独立 <code>CODEX_HOME</code>；启动前先探测可用性，不做无意义的失败尝试。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M7.5 7.5l2.5 2.5M16.5 7.5 14 10M7.5 16.5 10 14M16.5 16.5 14 14"/><circle cx="12" cy="12" r="3.2"/></svg></div>
+          <h3>DeepHarness（自研）</h3>
+          <p>多步规划 → 工具执行 → 反思重试 → SQLite 长期记忆。核心循环由本项目的 Rust Worker 独立进程承载，支持插件扩展。</p>
+        </div>
+      </div>
+    </div>
+  </section>
 
   <section id="features">
     <div class="wrap">
@@ -312,7 +340,7 @@
         <div class="card">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></div>
           <h3>Agent 工具调用</h3>
-          <p>命令执行、目录列举，多轮工具调用完成任务。</p>
+          <p>读文本文件、写文本文件、列目录、建目录、删路径 —— 每个调用都必须先过该 Agent 的权限白名单。</p>
         </div>
         <div class="card">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M9 10V6a3 3 0 0 1 6 0v4"/></svg></div>
@@ -327,12 +355,32 @@
         <div class="card">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></div>
           <h3>环境自检</h3>
-          <p>检测 Python / Node / Git，缺失自动补齐便携运行时。</p>
+          <p>启动即检测随包 Node、dsh 与系统 codex 的可用性，缺什么就在界面上说清楚，不静默失败。</p>
         </div>
         <div class="card">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
           <h3>本地隐私</h3>
-          <p>对话全本地存储、零遥测，数据只属于你。</p>
+          <p>对话、配置与记忆全部落在本机各自的目录里，零遥测，无账号，数据只属于你。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 4.4 3.4 8.4 8 10 4.6-1.6 8-5.6 8-10V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+          <h3>逐 Agent 权限白名单</h3>
+          <p>每个 Agent 一份独立的 <code>permissions.json</code>；工作区隐式可读写，外部路径必须显式授权；按规范化前缀匹配，<code>C:\dir</code> 不会放行 <code>C:\dir-evil</code>。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l5 9-5 9H9l-5-9z"/><path d="M9 8h6M9 16h6"/></svg></div>
+          <h3>插件系统</h3>
+          <p>自研 <code>.dph-plugin</code> 格式，三重隔离：每次调用独立 <code>node</code> 子进程、文件系统限定在插件目录内、<code>ctx</code> 文件操作回流宿主过同一道白名单。内置工具优先，插件不可覆盖。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></div>
+          <h3>长期记忆</h3>
+          <p>自研 Agent 把任务事件与结论沉淀到本机 SQLite 记忆库，下次任务可检索复用 —— 每个 Agent 各自独立，互不串味。</p>
+        </div>
+        <div class="card">
+          <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg></div>
+          <h3>规划与反思重试</h3>
+          <p>目标先拆成可执行步骤，逐步执行后由反思器逐步复检，失败即带错误反馈重试或修订该步，而不是整任务推倒重来。</p>
         </div>
       </div>
     </div>
@@ -348,7 +396,7 @@
         <div class="mockup" aria-hidden="true">
           <div class="mockup-bar">
             <span class="mockup-dot r"></span><span class="mockup-dot y"></span><span class="mockup-dot g"></span>
-            <span class="mockup-title">DeepSeek Harness Desktop</span>
+            <span class="mockup-title">DeepHarness</span>
           </div>
           <div class="mockup-body">
             <div class="m-side">
@@ -370,8 +418,9 @@
               <div class="m-ctx-row"><span>消息数</span><b>12</b></div>
               <div class="m-ctx-row"><span>约消耗 token</span><b>2,340</b></div>
               <h4 style="margin-top:14px">工具</h4>
-              <div class="m-ctx-row"><span>代码执行</span><b>已开启</b></div>
-              <div class="m-ctx-row"><span>文件读写</span><b>已开启</b></div>
+              <div class="m-ctx-row"><span>读 / 写文件</span><b>已授权</b></div>
+              <div class="m-ctx-row"><span>列目录 / 建目录</span><b>已授权</b></div>
+              <div class="m-ctx-row"><span>插件工具</span><b>2 个</b></div>
             </div>
           </div>
         </div>
@@ -397,7 +446,7 @@
         <div>
           <h3>从源码构建</h3>
           <div class="code">npm install<br />npm run tauri dev&nbsp;&nbsp;&nbsp;# 开发模式<br />npm run tauri build&nbsp;&nbsp;# 打包安装程序</div>
-          <p style="margin-top:14px;font-size:13px;color:var(--muted);">需要 Node.js ≥ 18、Rust（stable-msvc）与 Visual Studio Build Tools。</p>
+          <p style="margin-top:14px;font-size:13px;color:var(--muted);">需要 Node.js ≥ 20（CI 用 22）、Rust stable-msvc 与 Visual Studio Build Tools。<br />打包前先跑一遍 <code>bash scripts/setup-resources.sh</code> 生成随包资源（Node 便携版 + dsh）—— <code>resources/</code> 在 <code>.gitignore</code> 里，缺了它 <code>cargo build</code> 会在校验资源 glob 时失败。</p>
         </div>
       </div>
     </div>
@@ -416,7 +465,15 @@
         </details>
         <details class="faq-item">
           <summary>这个项目是 DeepSeek 官方的吗？</summary>
-          <div class="faq-a">不是。本项目是独立开发的第三方桌面封装工具，与 DeepSeek 公司无官方隶属关系。应用图标和品牌名称经合理使用标识与 DeepSeek 的关系，详细见仓库 <code>README</code> 商标说明。</div>
+          <div class="faq-a">不是。本项目是独立开发的第三方桌面工作台，与 DeepSeek 公司无官方隶属关系，也未使用其商标或图形标识作为本项目标志。对 dsh 与 Codex 都是以各自官方 CLI 的形式调用，代码按 MIT 协议开源。</div>
+        </details>
+        <details class="faq-item">
+          <summary>插件怎么写、怎么装？</summary>
+          <div class="faq-a">把 <code>manifest.json</code> 与 <code>index.js</code> 打成 zip、扩展名取 <code>.dph-plugin</code>，在应用里的插件面板导入即可。入口导出形如 <code>module.exports = { tools: { async 工具名(args, ctx) { … } } }</code>。插件运行在三重隔离下：每次调用起一个独立 <code>node</code> 子进程（超时即杀）、文件系统被限定在插件目录内、<code>ctx.readFile / writeFile / listDir</code> 会回到宿主过与内置工具同一道权限白名单。插件工具与内置同名时<b>内置优先</b>，且插件作用域按 Agent 隔离。</div>
+        </details>
+        <details class="faq-item">
+          <summary>为什么安装包有 55 MB？</summary>
+          <div class="faq-a">为了「装完即可用」：包里内置了便携版 Node 与官方 dsh，用户不需要自己装 Node、也不需要联网拉依赖。这部分占了绝大部分体积，换来的是零配置启动。若只想体验界面，可用 README 里的「从源码构建」自行打包瘦身版本。</div>
         </details>
         <details class="faq-item">
           <summary>支持 macOS / Linux 吗？</summary>
@@ -432,7 +489,7 @@
         </details>
         <details class="faq-item">
           <summary>我的对话和 API Key 安全吗？</summary>
-          <div class="faq-a">对话记录和 API Key 仅存储在本机（<code>localStorage</code> + 磁盘 JSON），不上传任何服务器，无任何遥测。但请注意：API Key 发往 DeepSeek 官方 API 是必要的，请求会经过你的网络。</div>
+          <div class="faq-a">对话、配置与记忆只写在本机的应用数据目录（每个 Agent 各自独立子目录）与本地存储中，项目不含任何遥测或统计上报。需要注意：API Key 发往你所配置的模型服务端是必要环节，这部分请求会经过你的网络。</div>
         </details>
       </div>
     </div>
@@ -446,11 +503,14 @@
       </div>
       <div class="stack-tags">
         <span class="tag">Tauri 2</span>
-        <span class="tag">React 18</span>
-        <span class="tag">TypeScript</span>
+        <span class="tag">React 19</span>
+        <span class="tag">TypeScript 5</span>
         <span class="tag">Rust</span>
         <span class="tag">Vite</span>
         <span class="tag">Zustand</span>
+        <span class="tag">SQLite（记忆库）</span>
+        <span class="tag">NSIS（安装包）</span>
+        <span class="tag">MIT License</span>
       </div>
     </div>
   </section>
@@ -462,7 +522,7 @@
         <a href="https://github.com/yuntaojinghong/DeepHarness/releases" target="_blank" rel="noopener">Releases</a>
         <a href="https://github.com/yuntaojinghong/DeepHarness/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
       </div>
-      <div>© 2026 DeepSeek Harness Desktop · 本页面鲸鱼标志来自 DeepSeek 官方，仅用于标识项目与 DeepSeek 的关系。</div>
+      <div>© 2026 DeepHarness · 独立开发的第三方项目，与 DeepSeek 公司无官方隶属关系。以 MIT 协议开源。</div>
     </div>
   </footer>
 
