@@ -34,6 +34,7 @@
   - SQLite 长期记忆库（rusqlite bundled，免系统依赖）：fact / preference / event / reflection 四类记忆，标签、重要度与分词召回，Worker 协议新增 `remember` / `recall` / `forget` / `memory_stats`；
   - Worker 协议扩展：`configure`（注入模型参数与 Agent 目录）、`plan`、`run_task` 及全部记忆操作，未配置请求返回明确错误。
   - 主进程 IPC 命令层：`deepharness_configure` / `deepharness_get_config`（apiKey 打码）/ `deepharness_status` / `deepharness_run_task` / `deepharness_plan` / `deepharness_remember` / `deepharness_recall` / `deepharness_forget` / `deepharness_memory_stats`；模型配置持久化至 Agent 隔离目录（`config/agent_config.json`，不回显 Key），Worker 启动时自动注入已保存配置，未运行时命令自动拉起 Worker；注册表改为 `Arc` 持有并新增 `NativeAgentHandle` 托管状态，长任务不阻塞注册表全局锁。
+- **界面端到端验证脚本**（`scripts/verify-ui.mjs`，`npm run verify:ui`）：在真实浏览器里验证界面，且**不依赖任何浏览器自动化 CLI**——脚本自行用 Node 托管 `dist/`、拉起无头 Edge 并经 CDP 驱动，还会先写入一段种子会话到 `localStorage` 再重载，从而在**无需 API Key** 的情况下走通 `MessageBubble → 异步 Markdown → 代码高亮` 完整渲染链路。断言不只检查「元素存在」，而是检查**结果正确**：无未捕获异常、代码块确实被着色（着色 token 的 `color` 必须不同于正文）、`innerHTML` 去标签后原始 token 不丢、未注册语言保持纯文本、异步 chunk 确实按需加载、界面文案与真实工具集一致。报告与截图写入 `.verify-ui/`。
 - **跨模块集成测试**（`src-tauri/tests/public_api.rs`）：只经由 `deepharness_lib::…` 公开接口访问，校验规划器↔工具注册表、`AccessMode` 与 serde 名、记忆类型、反思 JSON 的 camelCase、配置持久化与三 Agent 目录隔离等跨模块契约。
 - **阶段 4 · 前端三 Agent 主界面与 DeepHarness 任务控制台**：
   - 自研 React 界面成为唯一主界面：左侧 Agent 切换 + 会话列表，中间对话 / 任务视图，右侧上下文面板；官方 Web UI 降级为标题栏的「在浏览器中打开」可选按钮（仅在 Harness 运行时可用）。
@@ -75,6 +76,10 @@
 - **Worker 未配置时的报错不指向根因**：`plan` / `run_task` / `remember` / `recall` / `forget` 都先校验请求载荷、后检查配置，未配置时返回的是「缺少 goal」这类字段错误。现改为配置类前置条件优先，报错明确提示先 `configure`。
 - **`agent_config` 单测相互踩踏**：测试目录按进程 id 复用，并行执行时写损坏 JSON 的用例会让读回用例拿到 `None` 而随机失败。改为每个用例独立临时目录。
 - **CI 的 Windows Python 步骤因中文输出失败**：runner 上 Python 的 stdout 默认按 cp1252（charmap）编码，`shell: python` 步骤里任何中文 print 都会抛 `UnicodeEncodeError` 并把步骤判为失败——应用清单校验因此在「已经校验完第一个二进制、正要打印成功提示」时中断。现于 job 级设置 `PYTHONUTF8` / `PYTHONIOENCODING`，并在两个内联脚本里显式 `reconfigure` stdout/stderr，使步骤不再依赖 runner 语言环境。
+
+- **安装包内嵌了十几 MB 的历史构建产物**：`vite.config.ts` 里 `build.emptyOutDir` 为 `false`，而 Tauri 的 `frontendDist` 指向 `dist/` 并会把这个目录**整体**嵌入二进制。于是每一次构建产出的哈希 bundle 都留在原地并被打进安装包：实测 `dist/assets` 堆积到 **17 个文件 / 13.4MB**，其中真正在用的只有 7 个 / 713KB —— **约 18.8 倍的死重量**，同时还把上个项目（StarCore）时期的字符串一起发进了安装包。现改回 `emptyOutDir: true`，并在配置里写清「为何必须保持清空」。
+- **首屏要解析约 1MB 用不到的 JavaScript**：`highlight.js` 经由便捷入口引入，会把**全部 386 种语言定义**一次性打进产物；`Markdown` 组件又是静态导入，于是入口 chunk 达到 1,328,041 字节，其中绝大部分是极少用到的语法定义。现让 `Markdown` 走 `lazy` + `Suspense`（以纯文本为兜底，气泡不会空白或跳变，并在启动时预热异步块），并把高亮逻辑抽到 `src/lib/highlight.ts`，改用 `highlight.js/lib/core` + **精选注册 48 种常用语言**；未注册的语言**刻意不交给 hljs**（否则它会对每个代码块打警告），改为基础样式 + 保持纯文本，自动探测相关度低于阈值时同样不着色，避免把普通文本染花。入口 chunk 从 1,328,041 字节降到 **97,160** 字节，Markdown 块（241,133 字节）按需加载；另加 `manualChunks` 把 React 运行时单独成块。
+- **右侧「工具」面板宣称了并不存在的能力**：面板上摆着「代码执行」「文件读写」「网页搜索」三个开关，但实际下发给模型的 `AGENT_TOOLS` **只有 `list_dir` / `read_file` / `write_file`** —— 其中两个开关没有任何对应工具，而且三个开关在启用判断里被合并成一个布尔值（`tools.code || tools.file || tools.search`），拨动任意一个都在改同一件事。用户看到的是一个会变化、却不会带来任何能力变化的开关。现把工具定义收敛到 `src/lib/agent-tools.ts` 作为**单一来源**，面板文案由导出的 `AGENT_TOOL_NAMES` 派生并列出真实工具名，`ToolToggle` 简化为单个 `fileTools` 字段。不提供命令执行与网络访问是**刻意的安全边界**，现由 `FORBIDDEN_TOOL_NAMES` 固化为测试而不是口头约定。
 
 ## [1.0.0-alpha.1] - 2026-09-12
 

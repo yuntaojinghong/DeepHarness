@@ -115,13 +115,16 @@ npm run dev
 # 校验
 npm run typecheck && npm test
 
+# 界面端到端验证（无头 Edge + CDP，改界面时跑）
+npm run verify:ui
+
 # 打包安装程序
 npm run tauri build
 ```
 
 `npm run setup:resources` 会把便携版 Node 与 `@deepseek-ai/dsh` 装到 `resources/`（已 gitignore），打包时随安装包内置，用户侧无需安装任何东西。脚本是**版本驱动**的：随包 Node 与 dsh 版本与目标不一致时会自动重装，不需要手工删目录。
 
-> **本地不装 Rust 工具链也能改前端**：`npm run typecheck` / `npm test` / `npm run build` 都不需要 Rust。Rust 侧的改动请依赖 CI 验证。
+> **本地不装 Rust 工具链也能改前端**：`npm run typecheck` / `npm test` / `npm run build` / `npm run verify:ui` 都不需要 Rust。Rust 侧的改动请依赖 CI 验证。
 
 ## 📥 下载安装
 
@@ -168,6 +171,7 @@ DeepHarness/
 ├── scripts/
 │   ├── setup-resources.sh        # 下载便携 Node + 安装 dsh（版本驱动）
 │   ├── scan-peers.cjs            # 同行依赖扫描补齐
+│   ├── verify-ui.mjs             # 界面端到端验证（无头 Edge + CDP）
 │   └── gen_icons.py              # 品牌图标程序化生成
 └── docs/index.html               # GitHub Pages 主页
 ```
@@ -176,10 +180,13 @@ DeepHarness/
 
 ```bash
 npm test                                        # 前端单元测试（vitest）
+npm run verify:ui                               # 界面端到端验证（无头 Edge + CDP）
 cargo test --manifest-path src-tauri/Cargo.toml # Rust 单元测试 + 跨模块集成测试
 ```
 
 Rust 侧除了各模块单测，还有一层**跨模块集成测试**（`src-tauri/tests/public_api.rs`）：只经公开接口访问，校验规划器 ↔ 工具注册表、serde 的 camelCase 契约、配置持久化与三 Agent 目录隔离等**跨模块约定**——这类约定最容易在重构中悄悄破掉。
+
+**`npm run verify:ui`** 在真实浏览器里验证界面，不依赖任何浏览器自动化 CLI：脚本自行托管 `dist/`、拉起无头 Edge 并经 CDP 驱动，还会往 `localStorage` 写入一段种子会话再重载，从而在**不需要 API Key** 的情况下走通 `MessageBubble → 异步 Markdown → 代码高亮` 整条渲染链路。它断言的不只是「元素存在」，而是**算出来的结果对**：无未捕获异常、代码块确实被着色、`innerHTML` 去标签后原始 token 不丢、未注册语言保持纯文本、异步 chunk 真的按需加载、界面文案与真实工具集一致。报告与截图落在 `.verify-ui/`。
 
 CI 分三个 job 并行：前端（类型检查 / 单测 / 构建）、Rust（编译 + 测试 + 应用清单校验）、打包（NSIS 安装程序，产物缺失即判失败）。Rust job 会额外解析 exe 的 `RT_MANIFEST` 资源并断言含 Common-Controls v6——缺了它，tao 静态导入的 `comctl32!TaskDialogIndirect` 会让测试进程在加载期以 `0xc0000139` 整体退出。
 
@@ -189,7 +196,7 @@ CI 分三个 job 并行：前端（类型检查 / 单测 / 构建）、Rust（�
 
 ## 🤝 贡献
 
-欢迎提交 Issue 与 Pull Request。提交前请确保 `npm run typecheck`、`npm test`、`npm run build` 通过。
+欢迎提交 Issue 与 Pull Request。提交前请确保 `npm run typecheck`、`npm test`、`npm run build` 通过；改动界面的话再跑一次 `npm run verify:ui`。
 
 ## 📄 License
 
