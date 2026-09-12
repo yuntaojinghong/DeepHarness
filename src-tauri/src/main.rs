@@ -8,7 +8,8 @@ fn main() {
     if args.len() >= 3 && args[1] == "--agent-worker" {
         let mut stdin = std::io::BufReader::new(std::io::stdin().lock());
         let mut stdout = std::io::stdout().lock();
-        let _exit = deepharness_lib::agents::worker::run_worker_loop(&mut stdin, &mut stdout);
+        let mut worker_state = deepharness_lib::agents::worker::WorkerState::new();
+        let _exit = deepharness_lib::agents::worker::run_worker_loop(&mut stdin, &mut stdout, &mut worker_state);
         return;
     }
     deepharness_lib::run()

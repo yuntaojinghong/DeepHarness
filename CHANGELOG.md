@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+### Added
+- **阶段 4 · DeepHarness Native Agent 核心**：
+  - 模型提供方抽象（`ModelProvider` trait）+ DeepSeek Chat Completions 实现，HTTP 走 Windows 原生 WinHTTP（系统 SChannel TLS，零新增编译负担）；
+  - 多步规划器：目标 → 结构化 JSON 计划（工具步骤 / 纯回答步骤），非法输出带错误反馈自动重试一次，步骤数上限防失控；
+  - 工具注册表：`read_text_file` / `write_text_file` / `list_directory` / `create_directory` / `delete_path`，全部经由权限白名单校验（Worker 直接读取主进程维护的 `permissions.json`，授权状态实时同步）；
+  - 反思器：每步执行后由模型结构化评审（success / summary / shouldRetry / advice），模型不可用时退化为按执行层结果判定的保守策略，保证任务循环有确定性出口；
+  - 任务编排（`TaskRunner`）：规划 → 逐步执行 → 反思 → 失败自动重试一次 → 总结（模型失败时拼接步骤摘要兜底）→ 任务事件写入长期记忆；
+  - SQLite 长期记忆库（rusqlite bundled，免系统依赖）：fact / preference / event / reflection 四类记忆，标签、重要度与分词召回，Worker 协议新增 `remember` / `recall` / `forget` / `memory_stats`；
+  - Worker 协议扩展：`configure`（注入模型参数与 Agent 目录）、`plan`、`run_task` 及全部记忆操作，未配置请求返回明确错误。
+
+### Changed
+- Windows 构建链补齐：MSYS2 侧补装 mingw-w64 头文件与 winpthreads（rusqlite bundled 编译 SQLite 所需）；Rust 链接统一启用 `link-self-contained`。
+
 ## [1.0.0-alpha.1] - 2026-09-12
 
 DeepHarness 重构启动：产品全面更名，确立「零配置、三 Agent 隔离」的新定位。

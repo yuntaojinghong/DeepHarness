@@ -14,6 +14,7 @@ pub mod agents;
 mod error;
 mod fs_ops;
 mod logging;
+pub mod native;
 mod paths;
 mod permissions;
 mod sessions;
