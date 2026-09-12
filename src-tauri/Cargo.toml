@@ -43,6 +43,18 @@ windows-sys = { version = "0.59", features = [
 [dev-dependencies]
 tempfile = "3"
 
+# 发布体积控制：安装包有 ≤30MB 的硬约束，而 Tauri 默认 release 配置
+# 会把符号表和调试信息一起留下（exe 常到 15MB 以上）。
+# - opt-level = "z"  ：面向体积优化（含 LLVM 的体积向内联策略）
+# - lto = "thin"     ：跨 crate 裁剪未用代码；thin 相比 fat 编译快得多，
+#                      对最终体积的影响通常只有几 MB 量级
+# - strip = true     ：剥掉符号表（cargo 1.59+ 原生支持，无需外部 strip）
+# - codegen-units=1  ：保留默认以外的单单元编译会让链接阶段过慢，故不动
+[profile.release]
+opt-level = "z"
+lto = "thin"
+strip = true
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
