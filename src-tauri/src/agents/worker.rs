@@ -26,9 +26,10 @@ use crate::native::executor::TaskRunner;
 use crate::native::memory::{MemoryStore, Memory};
 use crate::native::model::{DeepSeekProvider, ModelProvider};
 use crate::native::planner::{Plan, Planner};
-use crate::native::tools::ToolContext;
+use crate::native::tools::{tool_catalog, ToolContext};
 use crate::paths::{ensure_agent_dirs, validate_agent_id, AgentDirs};
 use crate::permissions::PermissionStore;
+use crate::plugins::{materialize_shim, PluginHost, PluginRuntime, PluginStore};
 
 /// Worker 请求。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

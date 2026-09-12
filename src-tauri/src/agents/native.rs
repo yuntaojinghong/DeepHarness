@@ -379,8 +379,7 @@ impl crate::agents::AgentRuntime for NativeAgentRuntime {
         }
     }
 
-    /// 该 Agent 的目录布局（插件热重载等跨模块调用需要用它定位配置）。
-    pub fn dirs(&self) -> &AgentDirs {
+    fn dirs(&self) -> &AgentDirs {
         &self.dirs
     }
 }

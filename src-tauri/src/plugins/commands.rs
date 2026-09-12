@@ -19,6 +19,9 @@ use base64::Engine as _;
 
 use crate::agents::agent_config::AgentModelConfig;
 use crate::agents::registry::NativeAgentHandle;
+// `dirs()` 是 `AgentRuntime` 的 trait 方法（不是固有方法），
+// 不把 trait 带进作用域就只会看到同名的私有字段。
+use crate::agents::AgentRuntime as _;
 use crate::error::{AppError, AppResult};
 use crate::fs_ops::BaseDir;
 use crate::paths::ensure_agent_dirs;
