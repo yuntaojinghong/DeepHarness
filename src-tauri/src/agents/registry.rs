@@ -170,7 +170,9 @@ pub async fn agent_open_web_ui(
     registry: tauri::State<'_, AgentRegistry>,
     agent: String,
 ) -> AppResult<String> {
-    let runtime: Arc<dyn AgentRuntime> = {
+    // 先把运行时从注册表里取出来（`cloned()` 得到的是 `Option<Arc<…>>`），
+    // 让 MutexGuard 在进入等待之前就释放。
+    let runtime: Option<Arc<dyn AgentRuntime>> = {
         let map = registry.get(&agent)?;
         map.get(agent.as_str()).cloned()
     };

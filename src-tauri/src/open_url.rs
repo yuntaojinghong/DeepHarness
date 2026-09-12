@@ -31,19 +31,16 @@ fn is_allowed_char(c: char) -> bool {
 
 /// 该 URL 是否可以被安全地交给系统浏览器打开。
 pub fn is_safe_external_url(url: &str) -> bool {
-    if !ALLOWED_HOST_PREFIXES
-        .iter()
-        .any(|prefix| url.starts_with(prefix))
-    {
-        return false;
-    }
-    // 前缀之后必须还有端口号，避免 `http://127.0.0.1:` 这种半截地址
+    // 注意 `*prefix`：数组 `.iter()` 产出的是 `&&str`，而 `strip_prefix` 的
+    // 模式参数接受的是 `&str`（`&&str` 要靠 std 的一个特例实现兜住，
+    // 显式解引用更稳）。
     let Some(rest) = ALLOWED_HOST_PREFIXES
         .iter()
-        .find_map(|prefix| url.strip_prefix(prefix))
+        .find_map(|prefix| url.strip_prefix(*prefix))
     else {
         return false;
     };
+    // 前缀之后必须还有端口号，避免 `http://127.0.0.1:` 这种半截地址
     let port_digits = rest.chars().take_while(|c| c.is_ascii_digit()).count();
     if port_digits == 0 {
         return false;
