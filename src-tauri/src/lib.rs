@@ -15,8 +15,8 @@ mod error;
 mod fs_ops;
 mod logging;
 pub mod native;
-mod paths;
-mod permissions;
+pub mod paths;
+pub mod permissions;
 mod sessions;
 
 use std::path::PathBuf;

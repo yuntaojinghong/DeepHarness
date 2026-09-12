@@ -301,11 +301,19 @@ mod tests {
     #[test]
     fn importance_is_clamped() {
         let store = MemoryStore::open_in_memory().unwrap();
-        store.remember("fact", "a", &[], 5.0).unwrap();
-        store.remember("fact", "b", &[], -3.0).unwrap();
+        let over = store.remember("fact", "a", &[], 5.0).unwrap();
+        let under = store.remember("fact", "b", &[], -3.0).unwrap();
+        // recent() 按写入顺序（id 倒序）返回，与重要度无关；本测试只关心
+        // 钳制，因此按 id 取回断言，不把「排序」这一无关行为耦合进来。
         let all = store.recent(10).unwrap();
-        assert_eq!(all[0].importance, 1.0);
-        assert_eq!(all[1].importance, 0.0);
+        let importance_of = |id: i64| {
+            all.iter()
+                .find(|m| m.id == id)
+                .unwrap_or_else(|| panic!("recent() 应包含记忆 {id}"))
+                .importance
+        };
+        assert_eq!(importance_of(over), 1.0, "超过 1.0 应被钳到 1.0");
+        assert_eq!(importance_of(under), 0.0, "小于 0.0 应被钳到 0.0");
     }
 
     #[test]
@@ -355,9 +363,19 @@ mod tests {
     fn tags_roundtrip_and_trim() {
         let store = MemoryStore::open_in_memory().unwrap();
         store
-            .remember("fact", "带标签", &[" a ", "", "b,c "], 0.5)
+            .remember("fact", "带标签", &[" a ", "", " b "], 0.5)
             .unwrap();
         let got = store.recall("带标签", 1).unwrap();
-        assert_eq!(got[0].tags, vec!["a", "b,c"]);
+        assert_eq!(got[0].tags, vec!["a", "b"], "标签应去空白并丢弃空项");
+    }
+
+    /// 标签以逗号分隔存储（见本模块头部说明），因此标签值本身不能含逗号：
+    /// 写入与读回使用同一个分隔约定，保证「写进去的」与「读出来的」对称。
+    #[test]
+    fn comma_inside_tag_is_treated_as_separator() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        store.remember("fact", "逗号标签", &["b,c"], 0.5).unwrap();
+        let got = store.recall("逗号标签", 1).unwrap();
+        assert_eq!(got[0].tags, vec!["b", "c"]);
     }
 }

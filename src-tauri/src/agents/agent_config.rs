@@ -76,12 +76,14 @@ mod tests {
     use super::*;
     use crate::paths::AgentDirs;
 
-    fn dirs() -> AgentDirs {
-        let root = std::env::temp_dir()
-            .join(format!("dh_cfg_{}", std::process::id()))
-            .join("agents")
-            .join("deepharness");
-        AgentDirs::from_root(root, "deepharness")
+    /// 每个测试一个独立的临时目录。
+    ///
+    /// 早前这里按「进程 id」复用同一目录，并行执行的测试会互相踩踏：
+    /// 写损坏 JSON 的那个测试会让「读回」测试拿到 None，从而随机失败。
+    fn dirs(tag: &str) -> (tempfile::TempDir, AgentDirs) {
+        let tmp = tempfile::tempdir().expect("创建临时目录");
+        let root = tmp.path().join("agents").join("deepharness").join(tag);
+        (tmp, AgentDirs::from_root(root, "deepharness"))
     }
 
     fn sample() -> AgentModelConfig {
@@ -114,7 +116,7 @@ mod tests {
 
     #[test]
     fn save_and_load_roundtrip() {
-        let d = dirs();
+        let (_t, d) = dirs("roundtrip");
         let cfg = sample();
         cfg.save(&d).expect("保存失败");
         assert!(AgentModelConfig::path(&d).is_file());
@@ -128,19 +130,13 @@ mod tests {
 
     #[test]
     fn load_missing_returns_none() {
-        let d = AgentDirs::from_root(
-            std::env::temp_dir()
-                .join(format!("dh_cfg_missing_{}", std::process::id()))
-                .join("agents")
-                .join("deepharness"),
-            "deepharness",
-        );
+        let (_t, d) = dirs("missing");
         assert!(AgentModelConfig::load(&d).is_none());
     }
 
     #[test]
     fn load_corrupt_returns_none_not_panic() {
-        let d = dirs();
+        let (_t, d) = dirs("corrupt");
         std::fs::create_dir_all(&d.config).unwrap();
         std::fs::write(AgentModelConfig::path(&d), "{ not json").unwrap();
         assert!(AgentModelConfig::load(&d).is_none());
@@ -150,7 +146,7 @@ mod tests {
     fn save_rejects_invalid_config() {
         let mut cfg = sample();
         cfg.api_key = String::new();
-        let d = dirs();
+        let (_t, d) = dirs("reject");
         assert!(cfg.save(&d).is_err());
         assert!(!AgentModelConfig::path(&d).exists(), "校验失败不应写文件");
     }
