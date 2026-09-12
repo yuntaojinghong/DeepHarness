@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
 import type { ChatMessage, ToolCallRecord } from "../types";
 import { streamChat, type ToolCallChunk } from "../lib/llm";
-import { listDir, runTool } from "../lib/env";
+import { listDir, readTextFile, writeTextFile, type AgentId } from "../lib/env";
 import { uid, exportConversationJson, exportConversationMarkdown, PERSONAS, notify } from "../lib/storage";
 import MessageBubble from "./MessageBubble";
 import Composer from "./Composer";
@@ -10,34 +10,60 @@ import LogoMark from "./Logo";
 import PersonaMenu from "./PersonaMenu";
 import { SparkIcon } from "./Icons";
 
+/**
+ * 当前聊天界面所属的 Agent。阶段 3 引入 Agent 隔离层后，
+ * 这里会改为按选中的 Agent 动态切换。
+ */
+const CURRENT_AGENT: AgentId = "deepseek-harness";
+
+/**
+ * Agent 工具集。注意：出于安全设计，这里不再提供任何命令执行能力；
+ * 文件操作全部经由 Rust 权限层（白名单校验）完成。
+ */
 const AGENT_TOOLS = [
   {
     type: "function",
     function: {
-      name: "run_command",
-      description: "在用户电脑上执行命令或运行脚本（Python / Node / 系统命令），返回标准输出与错误输出。cwd 为工作目录。",
-      parameters: {
-        type: "object",
-        properties: {
-          command: { type: "string", description: "要执行的命令" },
-          args: { type: "array", items: { type: "string" }, description: "命令参数列表" },
-          cwd: { type: "string", description: "工作目录，可省略" },
-        },
-        required: ["command"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "list_dir",
-      description: "列出指定目录下的文件与子目录，用于了解文件结构。",
+      description:
+        "列出指定目录下的文件与子目录。仅允许访问该 Agent 的工作区或用户已授权的目录；未授权时返回提示，需请用户在授权弹窗中放行。",
       parameters: {
         type: "object",
         properties: {
           path: { type: "string", description: "目录路径" },
         },
         required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_file",
+      description:
+        "读取文本文件内容（UTF-8）。仅允许读取该 Agent 的工作区或用户已授权的路径；未授权时返回提示，需请用户放行。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "文件路径" },
+        },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description:
+        "写入文本文件（UTF-8，覆盖写，父目录不存在时自动创建）。仅允许写入该 Agent 的工作区或用户已授权的路径；未授权时返回提示，需请用户放行。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "文件路径" },
+          content: { type: "string", description: "要写入的完整文本内容" },
+        },
+        required: ["path", "content"],
       },
     },
   },
@@ -148,19 +174,31 @@ export default function ChatArea() {
           let ok = true;
           try {
             const args = JSON.parse(tc.args || "{}");
-            if (tc.name === "run_command") {
-              const r = await runTool(String(args.command || ""), Array.isArray(args.args) ? args.args : [], args.cwd ? String(args.cwd) : undefined);
-              result = `exit=${r.code}\n${r.stdout || ""}${r.stderr ? `\n[stderr]\n${r.stderr}` : ""}`;
-            } else if (tc.name === "list_dir") {
-              const r = await listDir(String(args.path || "."));
+            if (tc.name === "list_dir") {
+              const r = await listDir(CURRENT_AGENT, String(args.path || "."));
               result = r.map((f) => `${f.isDir ? "[dir] " : ""}${f.name}${f.isDir ? "" : ` (${f.size} B)`}`).join("\n");
+            } else if (tc.name === "read_file") {
+              result = await readTextFile(CURRENT_AGENT, String(args.path || ""));
+            } else if (tc.name === "write_file") {
+              const written = await writeTextFile(
+                CURRENT_AGENT,
+                String(args.path || ""),
+                typeof args.content === "string" ? args.content : String(args.content ?? "")
+              );
+              result = `已写入 ${written} 字节`;
             } else {
               result = `未知工具: ${tc.name}`;
               ok = false;
             }
           } catch (e) {
             ok = false;
-            result = String(e);
+            const msg = e instanceof Error ? e.message : String(e);
+            if (msg.includes("路径不在授权范围内")) {
+              result =
+                "该路径未被授权。请告知用户：在界面上选择并授权该文件/文件夹后重试（每个 Agent 的授权相互独立）。";
+            } else {
+              result = msg;
+            }
           }
           records.push({ name: tc.name || "tool", args: tc.args || "", result, ok });
         }

@@ -8,7 +8,7 @@ rust-version = "1.77"
 
 [lib]
 name = "deepharness_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -24,7 +24,23 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "time"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+dunce = "1"
+base64 = "0.22"
+tracing-appender = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+win32job = "2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# tauri-build 的 cargo_toml 解析要求该表存在（可为空）
+[package.metadata]
+
+[package.metadata.tauri-winres]
+
+

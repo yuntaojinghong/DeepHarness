@@ -7,6 +7,31 @@
 
 ## [Unreleased]
 
+## [1.0.0-alpha.1] - 2026-09-12
+
+DeepHarness 重构启动：产品全面更名，确立「零配置、三 Agent 隔离」的新定位。
+
+### Added
+- **阶段 1 · 脚手架迁移**：更名 DeepHarness；React 19 + zustand 5 + Vite 6；TypeScript 全量 strict 模式；窗口启用 MicaDark 云母材质（网页背景透明）；全新品牌图标（挽具环母题，`scripts/gen_icons.py` 程序化生成）；启动动画改为 Logo 由模糊到清晰浮现（约 1.8 秒、不阻塞初始化）；配色收敛为钢蓝 → 青瓷单一渐变。
+- **阶段 2 · Rust 权限层**：
+  - 每 Agent 独立文件访问白名单（`permissions.json`，含读 / 读写模式、授权时间与来源，原子落盘）；
+  - Agent 自有 `workspace/` 目录隐式可读写，外部路径必须经用户显式授权；
+  - 规范化路径前缀匹配，杜绝 `C:\dir` 授权被 `C:\dir-evil` 绕过；容忍写尚不存在的新文件；
+  - 安全文件命令集：`read_text_file` / `read_file_base64` / `write_text_file` / `list_directory` / `create_directory` / `delete_path`（非空目录仅限工作区内递归删除）；
+  - 授权管理命令：`check_access` / `grant_access` / `revoke_access` / `list_grants` / `agent_dirs_info`。
+- **阶段 3 · Agent 隔离层**：
+  - `AgentRuntime` 抽象接口 + 注册表，三个 Agent 状态相互独立；
+  - DeepSeek Harness 运行时：dsh 子进程管理、就绪探测、独立日志；
+  - Codex 运行时：`CODEX_HOME` 隔离、`codex exec` 流式输出转发（日志 + 前端事件流）、按需拉起；
+  - DeepHarness 自研 Agent：`--agent-worker` 自我重执行 Sidecar，stdin/stdout JSON Lines 协议（ping/echo/status/shutdown），请求-响应往返、优雅停止 + 超时强杀；
+  - Windows Job Object：每 Agent 独立内存配额 + kill-on-close，主应用退出自动回收全部子进程；
+  - 每 Agent 独立会话存储（`agents/<id>/sessions/`，原子写、单文件损坏自动跳过）与独立日志目录。
+
+### Changed
+- **移除无限制的 `run_command`**：旧版可执行任意系统命令的 IPC 命令已删除；Agent 文件工具仅剩白名单内的 `list_dir` / `read_file` / `write_file`，越权时向模型返回明确的授权引导话术。
+- 仓库由 `DeepSeek-Harness-Desktop` 重命名为 **DeepHarness**，更新全部链接与更新检查 URL。
+- Cargo 侧引入 `anyhow` / `thiserror` / `tracing`（双输出：stdout + 按日滚动文件）/ `uuid` / `chrono` / `dunce` / `base64` / `win32job`。
+
 ## [0.4.0] - 2026-08-30
 
 ### Added
