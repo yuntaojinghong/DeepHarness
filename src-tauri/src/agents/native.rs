@@ -60,6 +60,11 @@ pub struct NativeAgentRuntime {
     /// 应用数据根目录（Worker 的 PermissionStore 直接读取
     /// `<data_root>/permissions.json`，授权状态自动同步）。
     data_root: PathBuf,
+    /// 随包 Node 路径，用于在 configure 时下发给 Worker 跑插件宿主。
+    ///
+    /// Worker 拿不到 Tauri 的资源解析能力，由主进程解析后下发；
+    /// `None` 表示插件能力不可用（Worker 会自动降级，内置工具不受影响）。
+    plugin_node: Option<PathBuf>,
     inner: Mutex<NativeInner>,
 }
 
@@ -72,6 +77,7 @@ impl NativeAgentRuntime {
             dirs,
             worker_exe,
             data_root,
+            plugin_node: None,
             inner: Mutex::new(NativeInner {
                 child: None,
                 stdin: None,
@@ -79,6 +85,12 @@ impl NativeAgentRuntime {
                 last_error: None,
             }),
         }
+    }
+
+    /// 指定随包 Node 路径（插件宿主用）。不调用时插件能力自动降级。
+    pub fn with_plugin_node(mut self, node: Option<PathBuf>) -> Self {
+        self.plugin_node = node;
+        self
     }
 
     fn spawn_worker(&self) -> AppResult<()> {

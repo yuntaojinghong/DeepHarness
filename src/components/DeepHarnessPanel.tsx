@@ -18,6 +18,7 @@ import {
   type MemoryStats,
 } from "../lib/deepharness";
 import { PlusIcon, SearchIcon, TrashIcon } from "./Icons";
+import PluginSection from "./PluginSection";
 
 /**
  * DeepHarness 的上下文面板：Worker 状态、模型接入参数与长期记忆库。
@@ -112,6 +113,8 @@ export default function DeepHarnessPanel() {
       />
 
       <MemorySection running={running} configured={readiness?.configured === true} />
+
+      <PluginSection />
     </div>
   );
 }

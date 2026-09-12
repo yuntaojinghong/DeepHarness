@@ -1433,3 +1433,19 @@ textarea:focus {
   color: var(--text-tertiary);
   border: 1px solid var(--border);
 }
+
+/* 插件面板里的代码示例：等宽、可横向滚动，避免长行把面板撑宽 */
+.dh-code {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 260px;
+}

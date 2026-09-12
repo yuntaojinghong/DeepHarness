@@ -33,6 +33,16 @@ tracing-appender = "0.2"
 version = "0.32"
 features = ["bundled"]
 
+# .dph-plugin 插件包是 zip。只开 deflate 特性：
+# - 默认特性会拉进 bzip2 / zstd 两个 C 依赖（要 C 编译器、编译更慢），
+#   而我们只需要最常见的 deflate；
+# - deflate 走 flate2 的纯 Rust 后端（miniz_oxide），该 crate 本来就在
+#   Tauri 的依赖树里，不引入新的原生依赖。
+[dependencies.zip]
+version = "2.6"
+default-features = false
+features = ["deflate"]
+
 [target.'cfg(windows)'.dependencies]
 win32job = "2"
 windows-sys = { version = "0.59", features = [

@@ -51,11 +51,48 @@ pub const MAX_STEPS: usize = 16;
 
 pub struct Planner {
     provider: std::sync::Arc<dyn ModelProvider>,
+    /// 规划 / 修订时可用的工具目录（内置 + 已启用插件工具）。
+    ///
+    /// 目录在构造时**冻结**：同一次任务从规划到逐步修订始终用同一份
+    /// 工具表，避免"规划时存在的插件工具，执行到一半被卸载"导致计划
+    /// 里出现悬空步骤。插件变更在下一个任务（下一次构造）才生效。
+    catalog: Vec<ToolDescriptor>,
 }
 
 impl Planner {
+    /// 只用内置工具构造（不加载任何插件）。
     pub fn new(provider: std::sync::Arc<dyn ModelProvider>) -> Self {
-        Self { provider }
+        Self::with_catalog(provider, builtin_catalog())
+    }
+
+    /// 用显式工具目录构造（内置 + 插件工具）。
+    pub fn with_catalog(
+        provider: std::sync::Arc<dyn ModelProvider>,
+        catalog: Vec<ToolDescriptor>,
+    ) -> Self {
+        Self { provider, catalog }
+    }
+
+    /// 当前生效的工具目录（前端展示 / 测试断言用）。
+    pub fn catalog(&self) -> &[ToolDescriptor] {
+        &self.catalog
+    }
+
+    /// 把工具目录渲染成提示词里的一段清单。
+    ///
+    /// 插件工具带上来源标记，便于模型与排障时区分内置能力与插件能力。
+    fn tools_desc(&self) -> String {
+        self.catalog
+            .iter()
+            .map(|t| match t.plugin_id.as_deref() {
+                Some(pid) => format!(
+                    "- {}: {} 参数: {}（来自插件 {pid}）",
+                    t.name, t.description, t.args_schema
+                ),
+                None => format!("- {}: {} 参数: {}", t.name, t.description, t.args_schema),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// 生成计划。
@@ -126,11 +163,7 @@ impl Planner {
         failure: &str,
         advice: &str,
     ) -> Option<PlanStep> {
-        let tools_desc = TOOLS
-            .iter()
-            .map(|t| format!("- {}: {} 参数: {}", t.name, t.description, t.args_schema))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let tools_desc = self.tools_desc();
 
         let system = format!(
             "你是 DeepHarness 桌面 Agent 的规划器。某一步执行失败，请修订该步骤使其可执行成功。\n\
@@ -175,15 +208,26 @@ impl Planner {
 }
 
 /// 解析"单个步骤 JSON"（reviser 的输出）：剥离围栏后按步骤规则校验。
+///
+/// 只接受内置工具名。需要放行插件工具时用 [`parse_step_json_in`]。
 pub fn parse_step_json(raw: &str) -> AppResult<PlanStep> {
+    parse_step_json_in(raw, &builtin_catalog())
+}
+
+/// 同 [`parse_step_json`]，但按给定工具目录校验工具名（内置 + 插件）。
+pub fn parse_step_json_in(raw: &str, catalog: &[ToolDescriptor]) -> AppResult<PlanStep> {
     let json_text = extract_json(raw)?;
     let value: serde_json::Value = serde_json::from_str(&json_text)
         .map_err(|e| AppError::Other(format!("修订步骤不是合法 JSON: {e}")))?;
-    parse_step_value(&value, 0)
+    parse_step_value(&value, 0, catalog)
 }
 
 /// 校验并转换单个步骤的 JSON 值（`index` 仅用于错误信息，从 0 起）。
-fn parse_step_value(sv: &serde_json::Value, index: usize) -> AppResult<PlanStep> {
+fn parse_step_value(
+    sv: &serde_json::Value,
+    index: usize,
+    catalog: &[ToolDescriptor],
+) -> AppResult<PlanStep> {
     let title = sv
         .get("title")
         .and_then(|v| v.as_str())
@@ -197,8 +241,8 @@ fn parse_step_value(sv: &serde_json::Value, index: usize) -> AppResult<PlanStep>
             if name.is_empty() {
                 None
             } else {
-                // 工具必须在注册表中，防止模型发明工具
-                if crate::native::tools::find_tool(&name).is_none() {
+                // 工具必须在当前工具目录中，防止模型发明工具
+                if !catalog.iter().any(|d| d.name == name) {
                     return Err(AppError::Other(format!(
                         "第 {} 步引用了未知工具: {name}",
                         index + 1
@@ -261,7 +305,7 @@ pub fn parse_plan(raw: &str) -> AppResult<Plan> {
 
     let mut steps = Vec::with_capacity(steps_value.len());
     for (i, sv) in steps_value.iter().enumerate() {
-        steps.push(parse_step_value(sv, i)?);
+        steps.push(parse_step_value(sv, i, catalog)?);
     }
 
     Ok(Plan { goal, steps })
@@ -464,5 +508,78 @@ mod tests {
         assert_eq!(step.tool, None);
         assert_eq!(step.expected, "说明");
         assert!(parse_step_json("完全不是 JSON").is_err());
+    }
+
+    // ── 插件工具接入规划器 ──────────────────────────────────────────
+
+    fn plugin_catalog() -> Vec<ToolDescriptor> {
+        let mut cat = builtin_catalog();
+        cat.push(ToolDescriptor {
+            name: "demo_summarize".to_string(),
+            description: "把一段文本压缩成一句话".to_string(),
+            args_schema: r#"{ "text": string }"#.to_string(),
+            source: "plugin".to_string(),
+            plugin_id: Some("com.test.demo".to_string()),
+        });
+        cat
+    }
+
+    /// 默认（不带插件）的规划器只看得到内置工具。
+    #[test]
+    fn default_planner_catalog_is_builtin_only() {
+        let p = Planner::new(std::sync::Arc::new(FakeProvider::new(vec![])));
+        assert_eq!(p.catalog().len(), builtin_catalog().len());
+        assert!(p.catalog().iter().all(|d| d.plugin_id.is_none()));
+    }
+
+    /// 插件工具既进提示词，也能通过步骤校验；换回"仅内置"目录就必须被拒 ——
+    /// 证明校验真的按目录判定，而不是无条件放行。
+    #[test]
+    fn plugin_tools_are_prompted_and_accepted() {
+        let catalog = plugin_catalog();
+        let p = Planner::with_catalog(
+            std::sync::Arc::new(FakeProvider::new(vec![])),
+            catalog.clone(),
+        );
+
+        let desc = p.tools_desc();
+        assert!(desc.contains("demo_summarize"), "{desc}");
+        assert!(desc.contains("com.test.demo"), "提示词应标出插件来源: {desc}");
+
+        let raw = serde_json::json!({
+            "goal": "总结",
+            "steps": [{
+                "title": "调插件",
+                "tool": "demo_summarize",
+                "args": {"text": "hi"},
+                "expected": "一句话摘要"
+            }]
+        })
+        .to_string();
+
+        let plan = parse_plan_in(&raw, &catalog).unwrap();
+        assert_eq!(plan.steps[0].tool.as_deref(), Some("demo_summarize"));
+
+        // 同一份 JSON，在「仅内置」目录下是未知工具
+        let err = parse_plan(&raw).unwrap_err();
+        assert!(err.to_string().contains("未知工具"), "{err}");
+    }
+
+    /// 修订步骤也要认插件工具（否则失败重试会把插件步骤改掉/降级）。
+    #[test]
+    fn revise_step_accepts_plugin_tool() {
+        let revised = serde_json::json!({
+            "title": "改调插件", "tool": "demo_summarize",
+            "args": {"text": "hi"}, "expected": "摘要"
+        })
+        .to_string();
+        let p = Planner::with_catalog(
+            std::sync::Arc::new(FakeProvider::new(vec![revised])),
+            plugin_catalog(),
+        );
+        let out = p
+            .revise_step("总结", &sample_step(), "boom", "改用插件工具")
+            .expect("插件工具应被接受");
+        assert_eq!(out.tool.as_deref(), Some("demo_summarize"));
     }
 }

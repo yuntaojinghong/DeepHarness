@@ -8,6 +8,14 @@
 ## [Unreleased]
 
 ### Added
+- **阶段 5 · 插件系统（`.dph-plugin`）**：一个插件就是一个 zip，根目录放 `manifest.json` 与 `index.js`（`module.exports = { tools: { async 工具名(args, ctx) { … } } }`），装进哪个 Agent 的 `plugins/` 目录，就只有那个 Agent 能用它——三 Agent 的插件作用域与进程、会话、配置一样互不可见。
+  - **三重隔离**，缺一不可：① **进程隔离**——每次工具调用起一个 `node` 子进程，返回即退出，超时直接杀掉，插件崩溃只影响这一次调用；② **文件系统隔离**——子进程以 `node --permission --allow-fs-read=<插件目录>` 启动，越界读与任何写都被 Node 内核拒绝（`ERR_ACCESS_DENIED`），插件无法绕开宿主直接碰磁盘；③ **白名单代理**——插件要读工作区文件只能调 `ctx.readFile` / `ctx.writeFile` / `ctx.listDir`，这些请求经 JSON Lines 回传主进程，**逐次过与内置工具同一道 `PermissionStore` 闸门**，未授权路径拿到的仍是「需要用户授权」而不是文件内容。
+  - **宿主协议**（stdin/stdout 上的 JSON Lines，两个方向）：父进程下发 `invoke` / `hostResult`，子进程上行 `log` / `host` / `result` / `fatal`。日志截断上限 2000 字符、宿主调用上限 256 次、上行行数上限 10000 行，任何一类超限或管道关闭都会以明确错误收敛，绝不静默丢结果。
+  - **shim 以 `include_str!` 内嵌、运行时落地**（`materialize_shim` → `<数据目录>/plugin-host/host.cjs`）：`resources/` 在 `.gitignore` 里只保留 README，若把 shim 当 Tauri 资源打包，就会出现「开发能跑、装完缺文件」，因此改为编译期嵌进二进制、运行期比对内容后写出。内容不一致才重写，升级天然同步。
+  - **动态工具目录**：`ToolDescriptor` 为每个工具记录来源（`builtin` / `plugin`）与所属插件，规划提示词里插件工具会标注「（来自插件 X）」。目录在 `Planner` 构造时**冻结**，一次任务内规划与步骤修订始终用同一份，避免执行到一半插件被卸载后留下悬空步骤。插件与内置同名时**内置优先**，插件不能顶掉内置工具。
+  - 新增 Tauri 命令层（`plugin_list` / `plugin_dir` / `plugin_install` / `plugin_set_enabled` / `plugin_uninstall`）：安装走 base64 载荷，后端**不接受文件路径**（避免把任意路径读取变成一个隐藏入口），解码前先按长度挡一道、解码后校验 zip 魔数；安装 / 启停 / 卸载后**立即热重载**，不必重启应用。
+  - 前端新增插件面板（`PluginSection`，挂在 DeepHarness 右侧面板）：安装包选择、启停开关、卸载、插件目录展示与一键复制，并就地给出 `manifest.json` / `index.js` 示例与打包说明；`describeError` 统一错误文案，插件清单有问题时以告警标识但不影响其他插件。
+  - **插件是可选增强，全链可降级**：随包 Node 缺失、shim 落地失败、清单读不动、插件目录名与清单 id 不符——任一前置条件不满足都只是「没有插件工具」，内置工具与 Agent 启动完全不受影响（有专门测试断言这一行为）。
 - **「一键打开官方 Web UI」改为后端打开**（`agent_open_web_ui` + 新增模块 `open_url.rs`）：dsh 0.1.5 起官方 Web UI 需要**每次启动重新生成**的一次性 token（不带 token 访问直接 401，带旧 token 同样 401），且该 token 要等进程起来约 5 秒后才打印出来。前端原先固定 `window.open("http://127.0.0.1:3080")`，在新版本上只会打开一个 401 页面；而「await 拿到地址再 open」又会丢失用户手势（可能被弹窗拦截、或落到一个拿不到句柄的新窗口上）。现由 Rust 侧从 dsh 运行日志中解析出本次有效的地址并在系统默认浏览器中打开，同时把 token 留在后端、错误信息与返回文案一律脱敏（`token=***`）。新增的 `open_url` 模块只接受回环地址且字符集白名单化的 URL（拒绝 `& | ^ " ' \`` 空格与反斜杠），避免 `cmd /C start` 重新解析命令行时留下 shell 注入面，并配套 11 个单元测试。
 - **同行依赖扫描器**（`scripts/lib/scan-peers.cjs`）：遍历已安装包的 `package.json`，按 Node 的向上查找规则与粗粒度 semver 判断列出未被满足的 `peerDependencies`（跳过 `optional`），输出 `名字@范围` 规格交给 npm 显式安装。
 - 前端契约层新增 `agentOpenWebUi()`（`src/lib/deepharness.ts`），并补了「浏览器预览下必须明确拒绝而非静默打开 401 页面」的测试。

@@ -18,6 +18,7 @@ pub mod native;
 mod open_url;
 pub mod paths;
 pub mod permissions;
+pub mod plugins;
 mod process;
 mod sessions;
 
@@ -217,7 +218,9 @@ fn build_agent_registry(
         native_dirs,
         worker_exe,
         data_dir.to_path_buf(),
-    ));
+    )
+    // 插件宿主复用同一份随包 Node（与 dsh 共用，不额外打包）
+    .with_plugin_node(node.clone()));
     registry.register(native.clone())?;
 
     Ok((registry, native))

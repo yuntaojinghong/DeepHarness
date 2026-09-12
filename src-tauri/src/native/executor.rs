@@ -67,8 +67,12 @@ impl<'a> TaskRunner<'a> {
         ctx: ToolContext<'a>,
         memory: &'a MemoryStore,
     ) -> Self {
+        // 规划器与执行器共用同一份工具目录：内置工具 + 本次任务可见的
+        // 插件工具。少了它，模型既规划不出插件步骤，修订时也会把插件
+        // 步骤当成"未知工具"而错误降级。
+        let catalog = tool_catalog(ctx.plugins);
         Self {
-            planner: Planner::new(provider.clone()),
+            planner: Planner::with_catalog(provider.clone(), catalog),
             reflector: Reflector::new(provider.clone()),
             summarizer: provider,
             ctx,
@@ -446,5 +450,36 @@ mod tests {
         assert!(outcome.success);
         // 兜底文案形如「共 1 步，…」
         assert!(outcome.summary.contains("共 1 步"), "应走兜底拼接: {}", outcome.summary);
+    }
+
+    /// 插件工具必须进入执行器的规划器 —— 否则模型规划不出插件步骤，
+    /// 失败修订时还会把插件步骤判成"未知工具"而错误降级。
+    #[test]
+    fn runner_planner_catalog_includes_plugin_tools() {
+        use crate::plugins::{ManifestTool, PluginHost, PluginRuntime, PluginTool};
+        use std::path::PathBuf;
+
+        let (_t, dirs, perms, memory) = setup("plugcatalog");
+        let runtime = PluginRuntime::for_test(
+            PluginHost::new(PathBuf::from("node"), PathBuf::from("host.mjs")),
+            vec![PluginTool {
+                tool: ManifestTool {
+                    name: "demo_echo".to_string(),
+                    description: "回声".to_string(),
+                    args_schema: r#"{ "text": string }"#.to_string(),
+                },
+                plugin_id: "com.test.demo".to_string(),
+                plugin_name: "Demo".to_string(),
+                plugin_dir: PathBuf::from("C:/plugins/demo"),
+                entry: "index.js".to_string(),
+            }],
+        );
+        let ctx = ToolContext { perms: &perms, dirs: &dirs, plugins: Some(&runtime) };
+        let provider = Arc::new(ScriptedProvider::new(vec![]));
+        let runner = TaskRunner::new(provider, ctx, &memory);
+
+        let names: Vec<&str> = runner.planner.catalog().iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"demo_echo"), "规划器应看到插件工具: {names:?}");
+        assert!(names.contains(&"read_text_file"), "内置工具不能丢: {names:?}");
     }
 }

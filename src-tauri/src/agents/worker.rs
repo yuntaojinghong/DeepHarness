@@ -76,6 +76,12 @@ pub struct WorkerState {
     memory: Option<MemoryStore>,
     perms: Option<PermissionStore>,
     dirs: Option<AgentDirs>,
+    /// 本 Agent 的插件运行时（目录按 Agent 隔离，见 `AgentDirs::plugins`）。
+    ///
+    /// `None` 表示尚未 configure；configure 之后即使插件能力不可用也会
+    /// 被设为 `Some(空运行时)` —— 统一由运行时决定"有没有插件工具"，
+    /// 调用方不需要区分"没配置"与"没插件"。
+    plugins: Option<PluginRuntime>,
 }
 
 impl WorkerState {
@@ -86,12 +92,18 @@ impl WorkerState {
             memory: None,
             perms: None,
             dirs: None,
+            plugins: None,
         }
     }
 
     /// 是否已 configure。
     pub fn is_configured(&self) -> bool {
         self.provider.is_some() && self.memory.is_some() && self.perms.is_some() && self.dirs.is_some()
+    }
+
+    /// 当前可用的插件工具数（诊断用）。
+    pub fn plugin_tool_count(&self) -> usize {
+        self.plugins.as_ref().map(|p| p.tools().len()).unwrap_or(0)
     }
 
     fn require_provider(&self) -> AppResult<std::sync::Arc<dyn ModelProvider>> {
@@ -108,9 +120,18 @@ impl WorkerState {
 
     fn require_tools(&self) -> AppResult<ToolContext<'_>> {
         match (&self.perms, &self.dirs) {
-            (Some(perms), Some(dirs)) => Ok(ToolContext { perms, dirs }),
+            (Some(perms), Some(dirs)) => Ok(ToolContext {
+                perms,
+                dirs,
+                plugins: self.plugins.as_ref(),
+            }),
             _ => Err(AppError::Other("Worker 尚未 configure（缺少工具上下文）".to_string())),
         }
+    }
+
+    /// 规划器使用的工具目录（内置 + 本 Agent 已启用的插件工具）。
+    fn tool_catalog(&self) -> Vec<crate::native::tools::ToolDescriptor> {
+        tool_catalog(self.plugins.as_ref())
     }
 }
 
@@ -318,18 +339,87 @@ fn handle_configure(payload: &serde_json::Value, state: &mut WorkerState) -> App
     let provider: std::sync::Arc<dyn ModelProvider> = std::sync::Arc::new(
         DeepSeekProvider::new(cfg.base_url.clone(), cfg.api_key.clone(), cfg.model.clone()),
     );
+    // 插件运行时：目录天然按 Agent 隔离（`ensure_agent_dirs` 保证 plugins/ 存在）。
+    // 每次 configure 都重建 —— 磁盘上的插件安装/启停/卸载因此只需重新
+    // configure 即生效，不需要重启 Worker。
+    let plugins = build_plugin_runtime(&data_root, &dirs, cfg.plugin_node.as_deref());
 
     state.provider = Some(provider);
     state.memory = Some(memory);
     state.perms = Some(perms);
     state.dirs = Some(dirs);
+    state.plugins = Some(plugins);
 
-    tracing::info!(agent = %cfg.agent_id, model = %cfg.model, "Worker 已 configure");
+    tracing::info!(
+        agent = %cfg.agent_id,
+        model = %cfg.model,
+        plugin_tools = state.plugin_tool_count(),
+        "Worker 已 configure"
+    );
     Ok(serde_json::json!({
         "agent": cfg.agent_id,
         "model": cfg.model,
         "workspace": state.dirs.as_ref().map(|d| d.workspace.display().to_string()),
+        "pluginTools": state.plugin_tool_count(),
     }))
+}
+
+/// 构建本 Agent 的插件运行时。
+///
+/// 任何前置条件缺失（随包 Node 未下发 / 不存在 / shim 落地失败 / 插件清单
+/// 读不动）都**降级为空运行时**并落一条 warn 日志：插件是可选增强，绝不能
+/// 因为它把整个 Agent 的启动或任务循环拖垮。
+///
+/// 降级时**不注册任何插件工具**——把跑不起来的工具挂到模型面前只会让模型
+/// 规划出必然失败的步骤。
+fn build_plugin_runtime(
+    data_root: &std::path::Path,
+    dirs: &AgentDirs,
+    plugin_node: Option<&str>,
+) -> PluginRuntime {
+    let agent = &dirs.agent_id;
+    let node = plugin_node
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("node"));
+
+    let shim = match materialize_shim(data_root) {
+        Ok(path) => path,
+        Err(e) => {
+            tracing::warn!(agent = %agent, error = %e, "插件宿主 shim 落地失败，插件能力已禁用");
+            return PluginRuntime::empty(PluginHost::new(node, std::path::PathBuf::from("host.cjs")));
+        }
+    };
+
+    let host = PluginHost::new(node, shim);
+    if let Err(e) = host.check_available() {
+        tracing::warn!(agent = %agent, error = %e, "插件宿主不可用，插件能力已禁用");
+        return PluginRuntime::empty(host);
+    }
+
+    // 首次 configure 时顺手建好 plugins 目录，保证用户能看到"插件放这里"
+    if let Err(e) = std::fs::create_dir_all(&dirs.plugins) {
+        tracing::warn!(agent = %agent, error = %e, "创建插件目录失败（插件列表可能为空）");
+    }
+
+    let store = PluginStore::new(dirs);
+    match PluginRuntime::load(&store, host) {
+        Ok(runtime) => {
+            tracing::info!(
+                agent = %agent,
+                plugins_dir = %dirs.plugins.display(),
+                tools = runtime.tools().len(),
+                "插件运行时就绪"
+            );
+            runtime
+        }
+        Err(e) => {
+            tracing::warn!(agent = %agent, error = %e, "插件清单读取失败，插件能力已禁用");
+            PluginRuntime::empty(PluginHost::new(
+                std::path::PathBuf::from("node"),
+                std::path::PathBuf::from("host.cjs"),
+            ))
+        }
+    }
 }
 
 fn handle_plan(payload: &serde_json::Value, state: &WorkerState) -> AppResult<Plan> {
@@ -344,7 +434,7 @@ fn handle_plan(payload: &serde_json::Value, state: &WorkerState) -> AppResult<Pl
         .get("context")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    Planner::new(provider).make_plan(goal, context)
+    Planner::with_catalog(provider, state.tool_catalog()).make_plan(goal, context)
 }
 
 fn handle_run_task(payload: &serde_json::Value, state: &WorkerState) -> AppResult<crate::native::executor::TaskOutcome> {
@@ -643,5 +733,118 @@ mod tests {
             _ => panic!("应返回 Respond"),
         };
         assert_eq!(resp.payload["total"], 0);
+    }
+
+    // ── 插件接线 ──────────────────────────────────────────────────────
+
+    /// 未下发随包 Node 时，configure 必须**照常成功**（插件只是可选增强），
+    /// 且插件目录要被建好、插件工具数为 0。
+    #[test]
+    fn configure_degrades_gracefully_without_plugin_node() {
+        let mut state = WorkerState::new();
+        let tmp = tempfile::tempdir().unwrap();
+        let data_root = tmp.path().to_path_buf();
+        let req = WorkerRequest {
+            id: "p1".to_string(),
+            kind: "configure".to_string(),
+            payload: serde_json::json!({
+                "baseUrl": "https://api.example.test",
+                "apiKey": "sk-test",
+                "model": "deepseek-chat",
+                "agentId": "deepharness",
+                "dataRoot": data_root.display().to_string(),
+            }),
+        };
+        match handle_request(&req, &mut state) {
+            WorkerAction::Respond(resp) => assert!(resp.ok, "configure 不应因缺 Node 而失败: {:?}", resp.payload),
+            _ => panic!("应返回 Respond"),
+        }
+        assert!(state.is_configured());
+        assert_eq!(state.plugin_tool_count(), 0);
+        assert!(state.plugins.is_some(), "降级后仍应是 Some(空运行时)");
+        assert!(data_root.join("agents").join("deepharness").join("plugins").is_dir());
+    }
+
+    /// 有可用宿主 + 磁盘上有已启用插件时，插件工具必须进入运行时的工具表，
+    /// 并出现在规划器目录里（否则模型规划不出插件步骤）。
+    #[test]
+    fn configure_loads_enabled_plugins_into_catalog() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_root = tmp.path();
+        // 假 node：`check_available` 只要求它是文件，不要求真能跑
+        let fake_node = data_root.join("node.exe");
+        std::fs::write(&fake_node, b"stub").unwrap();
+
+        let dirs = ensure_agent_dirs(data_root, "deepharness").unwrap();
+        let plugin_dir = dirs.plugins.join("com.test.demo");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("manifest.json"),
+            r#"{
+                "id": "com.test.demo",
+                "name": "Demo",
+                "version": "1.0.0",
+                "description": "测试插件",
+                "tools": [
+                    {"name": "demo_echo", "description": "回声", "argsSchema": "{ \"text\": string }"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            plugin_dir.join("index.js"),
+            "module.exports = { tools: { demo_echo: async () => ({ ok: true }) } };",
+        )
+        .unwrap();
+
+        let runtime = build_plugin_runtime(
+            data_root,
+            &dirs,
+            Some(&fake_node.display().to_string()),
+        );
+        assert_eq!(runtime.tools().len(), 1, "已启用插件的工具应被加载");
+        assert_eq!(runtime.tools()[0].tool.name, "demo_echo");
+        assert_eq!(runtime.tools()[0].plugin_id, "com.test.demo");
+        // shim 必须已落地（宿主脚本缺失会让调用必然失败）
+        assert!(data_root.join("plugin-host").join("host.cjs").is_file());
+
+        // 目录里有插件工具 + 全部内置工具
+        let catalog = crate::native::tools::tool_catalog(Some(&runtime));
+        assert!(catalog.iter().any(|d| d.name == "demo_echo"));
+        assert!(catalog.iter().any(|d| d.name == "read_text_file"));
+    }
+
+    /// 插件 id 与目录名不一致的条目必须被跳过，而不是把别人的工具挂上来。
+    #[test]
+    fn plugin_dir_name_must_match_manifest_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data_root = tmp.path();
+        let fake_node = data_root.join("node.exe");
+        std::fs::write(&fake_node, b"stub").unwrap();
+
+        let dirs = ensure_agent_dirs(data_root, "deepharness").unwrap();
+        let plugin_dir = dirs.plugins.join("com.test.renamed");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("manifest.json"),
+            r#"{
+                "id": "com.test.other",
+                "name": "Mismatch",
+                "version": "1.0.0",
+                "tools": [{"name": "mismatch_tool", "description": "x"}]
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(plugin_dir.join("index.js"), "module.exports = {};").unwrap();
+
+        let runtime = build_plugin_runtime(
+            data_root,
+            &dirs,
+            Some(&fake_node.display().to_string()),
+        );
+        assert!(
+            runtime.tools().iter().all(|t| t.tool.name != "mismatch_tool"),
+            "id 与目录名不符的插件不得注册工具"
+        );
     }
 }
