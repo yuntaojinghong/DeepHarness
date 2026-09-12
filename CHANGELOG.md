@@ -20,7 +20,7 @@
 
 ### Changed
 - Windows 构建链补齐：MSYS2 侧补装 mingw-w64 头文件与 winpthreads（rusqlite bundled 编译 SQLite 所需）；Rust 链接统一启用 `link-self-contained`。
-- CI：`cargo test --no-run` 后新增导入表诊断步骤（解析测试 exe 静态/延迟导入并逐一校验目标 DLL 导出）；修复测试二进制 0xc0000139 —— tao 静态导入 `comctl32!TaskDialogIndirect`（仅 Common-Controls v6 导出），测试链接现嵌入带 v6 依赖的应用清单（`windows-app.manifest`）。
+- CI：`cargo test --lib --no-run` 后新增导入表诊断步骤（解析测试 exe 静态/延迟导入并逐一校验目标 DLL 导出，标记 `continue-on-error` 作为回归哨兵）；修复测试二进制 0xc0000139 —— tao 静态导入 `comctl32!TaskDialogIndirect`（仅 Common-Controls v6 导出），测试链接现由 `build.rs` 追加 `/MANIFEST:EMBED` + `/MANIFESTINPUT:windows-app.manifest`（bin 目标由 tauri-build 以资源嵌清单，故 CI 只链接 lib 测试目标）。
 
 ## [1.0.0-alpha.1] - 2026-09-12
 
