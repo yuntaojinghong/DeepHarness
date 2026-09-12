@@ -17,10 +17,17 @@
   - SQLite 长期记忆库（rusqlite bundled，免系统依赖）：fact / preference / event / reflection 四类记忆，标签、重要度与分词召回，Worker 协议新增 `remember` / `recall` / `forget` / `memory_stats`；
   - Worker 协议扩展：`configure`（注入模型参数与 Agent 目录）、`plan`、`run_task` 及全部记忆操作，未配置请求返回明确错误。
   - 主进程 IPC 命令层：`deepharness_configure` / `deepharness_get_config`（apiKey 打码）/ `deepharness_status` / `deepharness_run_task` / `deepharness_plan` / `deepharness_remember` / `deepharness_recall` / `deepharness_forget` / `deepharness_memory_stats`；模型配置持久化至 Agent 隔离目录（`config/agent_config.json`，不回显 Key），Worker 启动时自动注入已保存配置，未运行时命令自动拉起 Worker；注册表改为 `Arc` 持有并新增 `NativeAgentHandle` 托管状态，长任务不阻塞注册表全局锁。
+- **跨模块集成测试**（`src-tauri/tests/public_api.rs`）：只经由 `deepharness_lib::…` 公开接口访问，校验规划器↔工具注册表、`AccessMode` 与 serde 名、记忆类型、反思 JSON 的 camelCase、配置持久化与三 Agent 目录隔离等跨模块契约。
 
 ### Changed
 - Windows 构建链补齐：MSYS2 侧补装 mingw-w64 头文件与 winpthreads（rusqlite bundled 编译 SQLite 所需）；Rust 链接统一启用 `link-self-contained`。
-- CI：`cargo test --lib --no-run` 后新增导入表诊断步骤（解析测试 exe 静态/延迟导入并逐一校验目标 DLL 导出，标记 `continue-on-error` 作为回归哨兵）；修复测试二进制 0xc0000139 —— tao 静态导入 `comctl32!TaskDialogIndirect`（仅 Common-Controls v6 导出），测试链接现由 `build.rs` 追加 `/MANIFEST:EMBED` + `/MANIFESTINPUT:windows-app.manifest`（bin 目标由 tauri-build 以资源嵌清单，故 CI 只链接 lib 测试目标）。
+- **Windows 应用清单改由 `build.rs` 统一注入**：关闭 tauri-build 的默认清单（`WindowsAttributes::new_without_app_manifest`），改由 `build.rs` 对所有链接目标追加同一份 `windows-app.manifest`。此前 tauri-build 只给 bin 目标嵌清单（内部走 `embed-resource` 的 `rustc-link-arg-bins`），`cargo test` 产出的可执行文件完全没有清单，导致 tao 静态导入的 `comctl32!TaskDialogIndirect`（仅 Common-Controls v6 导出）解析失败、测试在加载期以 `0xc0000139` 整体退出。现在 MSVC 走 `/MANIFEST:EMBED` + `/MANIFESTINPUT`，GNU 走 windres 资源对象，bin 与测试目标共用唯一一份清单来源。
+- CI：测试步骤改为 `cargo test --lib` + `cargo test --test public_api`；仅编译不运行的那一步改用 `--message-format=json` 把 cargo 实际产出的测试可执行文件路径写盘，避免被 Cargo 缓存还原回来的历史产物干扰；原先的「导入表诊断」替换为**应用清单校验**（直接解析 exe 的 `RT_MANIFEST` 资源并断言含 Common-Controls v6），由 `continue-on-error` 的哨兵升级为硬性失败，故障信息也从「没有上下文的退出码」变成明确的原因。
+
+### Fixed
+- **非空目录递归删除在工作区内被误拒**：`native/tools.rs` 与 `fs_ops.rs` 都用未规范化的 `dirs.workspace` 去 `Path::strip_prefix` 一个已规范化的绝对路径，Windows 上因 `\\?\` 前缀 / 短名 / 大小写差异必然失配，导致工作区内的非空目录也无法递归删除。现统一改用新增的 `permissions::is_within`（两侧先规范化 + 大小写不敏感的前缀+分隔符匹配），并补了回归测试。
+- **Worker 未配置时的报错不指向根因**：`plan` / `run_task` / `remember` / `recall` / `forget` 都先校验请求载荷、后检查配置，未配置时返回的是「缺少 goal」这类字段错误。现改为配置类前置条件优先，报错明确提示先 `configure`。
+- **`agent_config` 单测相互踩踏**：测试目录按进程 id 复用，并行执行时写损坏 JSON 的用例会让读回用例拿到 `None` 而随机失败。改为每个用例独立临时目录。
 
 ## [1.0.0-alpha.1] - 2026-09-12
 

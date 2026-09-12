@@ -83,11 +83,48 @@ jobs:
         working-directory: src-tauri
         run: cargo check --all-targets
 
-      - name: 编译测试二进制（不运行）
+      # 只编译不运行，并把 cargo 实际产出的测试可执行文件路径记到
+      # target/debug/deps/ci-test-binaries.txt：后续步骤据此校验清单，
+      # 避免被 Cargo 缓存还原回来的历史产物干扰。
+      - name: 编译测试二进制并记录其路径
         working-directory: src-tauri
-        # 只编译 lib 的 unittests：bin 目标的清单由 tauri-build 以资源嵌入，
-        # 与 build.rs 追加的 /MANIFESTINPUT 叠加会产生重复清单依赖。
-        run: cargo test --lib --no-run
+        shell: python
+        run: |
+          import json, os, subprocess, sys
+
+          TARGETS = [["--lib"], ["--test", "public_api"]]
+          executables = []
+
+          for args in TARGETS:
+              proc = subprocess.run(
+                  ["cargo", "test", "--no-run", "--message-format=json"] + args,
+                  capture_output=True, text=True, encoding="utf-8", errors="replace",
+              )
+              for line in proc.stdout.splitlines():
+                  line = line.strip()
+                  if not line.startswith("{"):
+                      continue
+                  try:
+                      msg = json.loads(line)
+                  except json.JSONDecodeError:
+                      continue
+                  if msg.get("reason") == "compiler-artifact" and msg.get("executable"):
+                      exe = msg["executable"]
+                      # build script 自身的可执行文件不需要清单，排除掉
+                      if not os.path.basename(exe).startswith("build-script"):
+                          executables.append(exe)
+              if proc.returncode != 0:
+                  sys.stderr.write(proc.stderr[-6000:])
+                  sys.exit("cargo test --no-run %s 失败" % " ".join(args))
+
+          executables = sorted(set(executables))
+          if not executables:
+              sys.exit("没有编译出任何测试可执行文件")
+          os.makedirs("target/debug/deps", exist_ok=True)
+          with open("target/debug/deps/ci-test-binaries.txt", "w", encoding="utf-8") as fh:
+              fh.write("\n".join(executables))
+          for exe in executables:
+              print("test binary:", exe)
 
       - name: 就位测试所需的原生 DLL
         shell: pwsh
@@ -95,33 +132,34 @@ jobs:
         run: |
           # 测试二进制位于 target/debug/deps/，而 WebView2Loader.dll 由
           # webview2-com-sys 的 build script 产出到 OUT_DIR，必须复制到
-          # 测试 exe 旁边，否则加载阶段直接 STATUS_ENTRYPOINT_NOT_FOUND。
+          # 测试 exe 旁边，否则加载阶段直接 STATUS_DLL_NOT_FOUND。
           New-Item -ItemType Directory -Force -Path target/debug/deps | Out-Null
           Get-ChildItem -Path target/debug/build -Recurse -Filter "WebView2Loader.dll" |
             ForEach-Object { Copy-Item $_.FullName -Destination target/debug/deps -Force }
           Get-ChildItem target/debug/deps -Filter "WebView2Loader.dll" | ForEach-Object { $_.FullName }
 
-      # 回归哨兵：确认测试 exe 的每个静态导入都能解析到入口点
-      # （0xc0000139 的根因是 comctl32!TaskDialogIndirect 缺清单）。
-      # 诊断本身出问题不应阻塞 CI，故标记 continue-on-error。
-      - name: 诊断测试二进制导入表
-        continue-on-error: true
+      # 回归哨兵：tao 静态导入 comctl32.dll!TaskDialogIndirect，该符号只有
+      # Common-Controls v6（WinSxS 侧装程序集）导出。测试可执行文件若没有
+      # 应用清单，loader 会绑定 System32 的 comctl32 5.82，入口点解析失败 →
+      # STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)，一行测试都不会执行。
+      # 这里直接检查每个测试 exe 的 RT_MANIFEST 资源，把该故障变成明确报错，
+      # 而不是等到运行测试时收到一个没有上下文的退出码。
+      - name: 校验测试二进制的应用清单
         working-directory: src-tauri
         shell: python
         run: |
-          import ctypes, glob, os, struct, sys
+          import os, struct, sys
 
-          EXE_DIR = os.path.abspath("target/debug/deps")
-          SYSTEM32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
-          failures = []
-          visited = set()
+          LIST = "target/debug/deps/ci-test-binaries.txt"
+          RT_MANIFEST = 24
+          REQUIRED = ["Microsoft.Windows.Common-Controls", "6.0.0.0"]
 
           def read_pe(path):
               data = open(path, "rb").read()
               e = struct.unpack_from("<I", data, 0x3C)[0]
               if data[e:e+4] != b"PE\x00\x00":
                   raise ValueError("not a PE file")
-              machine, nsec, _, _, _, szopt, _ = struct.unpack_from("<HHIIIHH", data, e+4)
+              machine, nsec, _, _, _, szopt, _ = struct.unpack_from("<HHIIIHH", data, e + 4)
               opt = e + 24
               magic = struct.unpack_from("<H", data, opt)[0]
               ddir = opt + (112 if magic == 0x20B else 96)
@@ -137,123 +175,84 @@ jobs:
                       if va <= rva < va + sz:
                           return pr + (rva - va)
                   return None
-              return data, machine, dirs, r2o
+              return data, dirs, r2o
 
-          def cstr(data, off):
-              return data[off:data.index(b"\x00", off)].decode("utf-8", "replace")
+          def entries(data, base, off):
+              n_named, n_id = struct.unpack_from("<HH", data, off + 12)
+              out = []
+              for i in range(n_named + n_id):
+                  eo = off + 16 + i*8
+                  name, sub = struct.unpack_from("<II", data, eo)
+                  out.append((name, sub))
+              return out
 
-          def parse_imports(path):
-              data, machine, dirs, r2o = read_pe(path)
-              step = 8 if machine == 0x8664 else 4
-              ordflag = 1 << 63 if step == 8 else 1 << 31
-              fmt = "<Q" if step == 8 else "<I"
-              def thunks(rva):
-                  out = []
-                  o = r2o(rva)
-                  if o is None:
-                      return out
-                  for i in range(200000):
-                      v = struct.unpack_from(fmt, data, o + i*step)[0]
-                      if v == 0:
-                          break
-                      if v & ordflag:
-                          out.append(int(v & 0xFFFF))
-                      else:
-                          no = r2o(v & 0x7FFFFFFF)
-                          if no is not None:
-                              out.append(cstr(data, no + 2))
-                  return out
-              result = {}
-              rva = dirs[1][0]
-              if rva:
-                  o = r2o(rva)
-                  while True:
-                      oft, _, _, nrv, ft = struct.unpack_from("<IIIII", data, o)
-                      if oft == 0 and nrv == 0 and ft == 0:
-                          break
-                      dll = cstr(data, r2o(nrv)).lower()
-                      result[dll] = thunks(oft or ft)
-                      o += 20
-              rva = dirs[13][0]
-              if rva:
-                  o = r2o(rva)
-                  while True:
-                      gr, nrv, _, iat, pint = struct.unpack_from("<IIIII", data, o)
-                      if gr == 0 and nrv == 0:
-                          break
-                      dll = cstr(data, r2o(nrv)).lower()
-                      r = pint or iat
-                      if r:
-                          result.setdefault(dll, []).extend(thunks(r))
-                      o += 32
-              return machine, result
+          def manifests(path):
+              """返回 exe 内全部 RT_MANIFEST 资源的字节内容。"""
+              data, dirs, r2o = read_pe(path)
+              found = []
+              if not dirs[2][0]:
+                  return found
+              base = r2o(dirs[2][0])
+              for tname, toff in entries(data, base, base):
+                  if not (toff & 0x80000000):
+                      continue
+                  for _n, noff in entries(data, base, base + (toff & 0x7FFFFFFF)):
+                      if not (noff & 0x80000000):
+                          continue
+                      for _l, loff in entries(data, base, base + (noff & 0x7FFFFFFF)):
+                          if loff & 0x80000000:
+                              continue
+                          drva, dsize = struct.unpack_from("<II", data, base + loff)
+                          o = r2o(drva)
+                          blob = data[o:o+dsize]
+                          if tname & 0x80000000:
+                              # 命名资源类型：只认名字为 MANIFEST 的项
+                              so = r2o(tname & 0x7FFFFFFF)
+                              n = struct.unpack_from("<H", data, so)[0]
+                              label = data[so+2:so+2+n*2].decode("utf-16-le", "replace")
+                              if label.upper() != "MANIFEST":
+                                  continue
+                          elif tname != RT_MANIFEST:
+                              continue
+                          found.append(blob)
+              return found
 
-          def find_dll(name):
-              p = os.path.join(EXE_DIR, name)
-              if os.path.exists(p):
-                  return p
-              p = os.path.join(SYSTEM32, name)
-              if os.path.exists(p):
-                  return p
-              return None
+          if not os.path.isfile(LIST):
+              sys.exit("缺少测试二进制清单文件 %s（编译步骤未成功）" % LIST)
+          targets = [l.strip() for l in open(LIST, encoding="utf-8") if l.strip()]
+          if not targets:
+              sys.exit("测试二进制清单为空")
 
-          def check_dll(name, funcs, depth, tag):
-              key = (name.lower(), depth > 0)
-              if key in visited:
-                  return
-              visited.add(key)
-              path = find_dll(name)
-              note = ""
-              if path is None:
-                  note = " (apiset/loader-resolved)"
-                  if tag == "static":
-                      print("[static] %s%s: %d imports" % (name, note, len(funcs)))
-              else:
-                  print("[%s] %s -> %s (%d imports)" % (tag, name, path, len(funcs)))
-              if path is not None and depth > 0:
-                  try:
-                      m2, imp2 = parse_imports(path)
-                      if m2 != 0x8664:
-                          failures.append("ARCH MISMATCH %s: machine=0x%x" % (name, m2))
-                      for d2, f2 in imp2.items():
-                          check_dll(d2, f2, depth - 1, "dep")
-                  except Exception as exc:
-                      print("    (skip parse %s: %s)" % (name, exc))
+          problems = []
+          for exe in targets:
+              name = os.path.basename(exe)
+              if not os.path.isfile(exe):
+                  problems.append("%s: 文件不存在" % name)
+                  continue
               try:
-                  lib = ctypes.WinDLL(path or name)
-                  for f in funcs:
-                      try:
-                          if isinstance(f, int):
-                              lib[f]
-                          else:
-                              getattr(lib, f)
-                      except AttributeError:
-                          failures.append("ENTRY POINT MISSING: %s!%s" % (name, f))
-                      except OSError as exc:
-                          failures.append("SYMBOL ERROR: %s!%s -> %s" % (name, f, exc))
-              except OSError as exc:
-                  failures.append("LOAD FAILED: %s -> %s" % (name, exc))
+                  blobs = manifests(exe)
+              except Exception as exc:
+                  problems.append("%s: 无法解析 PE 资源（%s）" % (name, exc))
+                  continue
+              if not blobs:
+                  problems.append("%s: 没有嵌入 RT_MANIFEST 资源" % name)
+                  continue
+              text = b"".join(blobs).decode("utf-8", "replace")
+              missing = [n for n in REQUIRED if n not in text]
+              if missing:
+                  problems.append("%s: 清单缺少 %s" % (name, ", ".join(missing)))
+              else:
+                  print("OK   %s: 已嵌入 Common-Controls v6 清单（%d 字节）" % (name, len(text)))
 
-          exes = sorted(glob.glob(os.path.join(EXE_DIR, "deepharness_lib-*.exe")))
-          if not exes:
-              sys.exit("no deepharness_lib test exe found in " + EXE_DIR)
-          target = exes[-1]
-          machine, imports = parse_imports(target)
-          print("test exe:", target)
-          print("machine: 0x%x, imported DLLs: %d" % (machine, len(imports)))
-          for d, fs in sorted(imports.items()):
-              print("  %-55s %3d symbols" % (d, len(fs)))
-          print("--- resolving every import (static + 1-level deps) ---")
-          for d, fs in sorted(imports.items()):
-              check_dll(d, fs, depth=1, tag="static")
-          print("--- RESULT ---")
-          if failures:
-              print("FOUND %d problem(s):" % len(failures))
-              for f in failures:
-                  print("!!! " + f)
-          else:
-              print("OK: every imported DLL loads and every entry point resolves")
+          if problems:
+              print("\n发现 %d 个问题：" % len(problems))
+              for p in problems:
+                  print("!!! " + p)
+              sys.exit(1)
+          print("\n全部测试可执行文件的应用清单校验通过")
 
       - name: 运行测试
         working-directory: src-tauri
-        run: cargo test --lib
+        run: |
+          cargo test --lib
+          cargo test --test public_api
