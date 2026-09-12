@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!--
+    测试二进制（cargo test）的加载期依赖：
+    tao 静态导入 comctl32.dll!TaskDialogIndirect，该函数仅存在于
+    Common-Controls v6（WinSxS 侧装程序集）。没有本清单时 loader
+    解析到 System32 的 comctl32 5.82 → STATUS_ENTRYPOINT_NOT_FOUND
+    (0xc0000139)，一行测试都不会执行。
+    正式程序包由 tauri-build 为 bin 嵌入 manifest，不受影响。
+  -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+</assembly>
