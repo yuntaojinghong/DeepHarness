@@ -1,11 +1,12 @@
 import { useAppStore } from "../store";
+import { useVisibleConversations } from "../lib/hooks";
 import { AGENT_META } from "../lib/deepharness";
 import AgentSwitcher from "./AgentSwitcher";
 import { CpuIcon, PlusIcon, SearchIcon, TrashIcon } from "./Icons";
 
 export default function Sidebar() {
   const activeAgent = useAppStore((s) => s.activeAgent);
-  const conversations = useAppStore((s) => s.searchConversations());
+  const conversations = useVisibleConversations();
   const activeId = useAppStore((s) => s.activeId);
   const setActive = useAppStore((s) => s.setActive);
   const newConversation = useAppStore((s) => s.newConversation);

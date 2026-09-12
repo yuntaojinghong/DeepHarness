@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
+import { useAgentStatus } from "../lib/hooks";
 import {
   agentStart,
   deepharnessPlan,
@@ -26,7 +27,7 @@ import LogoMark from "./Logo";
  */
 export default function DeepHarnessView() {
   const activeAgent = useAppStore((s) => s.activeAgent);
-  const agentStatus = useAppStore((s) => s.agentStatus("deepharness"));
+  const agentStatus = useAgentStatus("deepharness");
   const readiness = useAppStore((s) => s.workerReadiness);
   const refreshAgents = useAppStore((s) => s.refreshAgents);
   const refreshWorkerReadiness = useAppStore((s) => s.refreshWorkerReadiness);

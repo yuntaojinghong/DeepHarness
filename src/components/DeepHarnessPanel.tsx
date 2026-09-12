@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppStore } from "../store";
+import { useAgentStatus } from "../lib/hooks";
 import {
   agentStart,
   agentStop,
@@ -25,7 +26,7 @@ import { PlusIcon, SearchIcon, TrashIcon } from "./Icons";
  * 配置、不共享记忆、不共享密钥，这也正是「三个 Agent 相互独立」的体现。
  */
 export default function DeepHarnessPanel() {
-  const status = useAppStore((s) => s.agentStatus("deepharness"));
+  const status = useAgentStatus("deepharness");
   const refreshAgents = useAppStore((s) => s.refreshAgents);
   const readiness = useAppStore((s) => s.workerReadiness);
   const refreshWorkerReadiness = useAppStore((s) => s.refreshWorkerReadiness);

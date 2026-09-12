@@ -12,9 +12,9 @@
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178c6.svg">
 </p>
 
-A sci-fi themed DeepSeek AI desktop workbench — double-click to run, auto-provisions its runtime, multi-model switching, and agentic tool calling.
+A zero-config desktop client that bundles the official DeepSeek Harness — three mutually isolated agent workspaces, out of the box.
 
-> **StarCore**: the energy core that harnesses the intelligence of the stars.
+> **DeepHarness**: the desktop home for the official DeepSeek Harness runtime.
 
 ## ✨ Features
 

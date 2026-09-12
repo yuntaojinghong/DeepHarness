@@ -14,7 +14,7 @@
 
 把官方 **DeepSeek Harness**（`dsh`）打包进桌面的开箱即用客户端：双击即用，内置便携版 Node 运行时与官方 Harness，启动即加载官方 Web UI——无需手动装 Node、跑命令或配置环境。
 
-> **星核 StarCore**：驾驭星辰智能的能量核心——科幻风 AI 工作台。
+> **DeepHarness**：把官方 DeepSeek Harness 装进桌面的零配置客户端——三个相互隔离的 Agent 工作台。
 
 ## ✨ 功能
 

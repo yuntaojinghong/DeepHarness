@@ -23,7 +23,7 @@ export default function WelcomeModal() {
       <div className="modal" style={{ width: 540 }}>
         <div className="modal-head">
           <span style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 15, fontWeight: 600 }}>
-            <LogoMark size={26} radius={8} /> 欢迎使用星核 StarCore
+            <LogoMark size={26} radius={8} /> 欢迎使用 DeepHarness
           </span>
           <button className="btn-icon btn-ghost" onClick={() => setWelcomeOpen(false)}>
             <CloseIcon />

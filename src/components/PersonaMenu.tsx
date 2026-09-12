@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
+import { useActiveConversation } from "../lib/hooks";
 import { PERSONAS } from "../lib/storage";
 import { ChevronDownIcon } from "./Icons";
 
 export default function PersonaMenu() {
-  const conv = useAppStore((s) => s.activeConversation());
+  const conv = useActiveConversation();
   const setPersona = useAppStore((s) => s.setPersona);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);

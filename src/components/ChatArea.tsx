@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
+import { useActiveConversation } from "../lib/hooks";
 import type { ChatMessage, ToolCallRecord } from "../types";
 import { streamChat, type ToolCallChunk } from "../lib/llm";
 import { listDir, readTextFile, writeTextFile, type AgentId } from "../lib/env";
@@ -73,7 +74,7 @@ const SUGGESTIONS = [
 ];
 
 export default function ChatArea() {
-  const conv = useAppStore((s) => s.activeConversation());
+  const conv = useActiveConversation();
   const tools = useAppStore((s) => s.tools);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const activeAgent = useAppStore((s) => s.activeAgent);

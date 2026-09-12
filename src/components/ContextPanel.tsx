@@ -1,10 +1,11 @@
 import { useAppStore } from "../store";
+import { useActiveConversation } from "../lib/hooks";
 import { AGENT_META } from "../lib/deepharness";
 import DeepHarnessPanel from "./DeepHarnessPanel";
 import { FolderIcon } from "./Icons";
 
 export default function ContextPanel() {
-  const conv = useAppStore((s) => s.activeConversation());
+  const conv = useActiveConversation();
   const tools = useAppStore((s) => s.tools);
   const setTools = useAppStore((s) => s.setTools);
   const settings = useAppStore((s) => s.settings);

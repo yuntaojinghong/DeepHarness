@@ -29,11 +29,7 @@ import {
   type AgentStatusView,
   type WorkerReadiness,
 } from "./lib/deepharness";
-
-/** 某个 Agent 名下的会话（按更新时间倒序无关，保持既有顺序）。 */
-function conversationsOf(list: Conversation[], agent: AgentId): Conversation[] {
-  return list.filter((c) => c.agent === agent);
-}
+import { conversationsOf, filterConversations } from "./lib/conversations";
 
 /** 启动时确定激活会话：优先上次选中项，其次该 Agent 的第一条。 */
 function bootstrapActiveId(list: Conversation[], agent: AgentId): string | null {
@@ -75,6 +71,14 @@ interface AppState {
   searchQuery: string;
   hydrated: boolean;
 
+  // ── 查询方法 ──────────────────────────────────────────────────────────
+  // 这些方法是给 **store 内部动作**（setPersona / selectModel 等）和普通函数
+  // 用的。其中 activeConversation / searchConversations / agentStatus 会返回
+  // 新引用或派生值，**不可**作为 `useAppStore(s => ...)` 的选择器返回值：
+  // zustand v5 用 Object.is 比较快照，新引用会让 React 无限重渲染
+  // （React #185），整棵树被卸载，界面只剩一片深色底（黑屏）。
+  // 组件侧请改用 src/lib/hooks.ts 里的 useActiveConversation /
+  // useVisibleConversations / useAgentStatus。
   activeConversation: () => Conversation | null;
   hydrate: () => Promise<void>;
   setActive: (id: string) => void;
@@ -275,13 +279,7 @@ export const useAppStore = create<AppState>((set, get) => {
 
   searchConversations: () => {
     const s = get();
-    const mine = conversationsOf(s.conversations, s.activeAgent);
-    const q = s.searchQuery.trim().toLowerCase();
-    if (!q) return mine;
-    return mine.filter((c) => {
-      if (c.title.toLowerCase().includes(q)) return true;
-      return c.messages.some((m) => m.content.toLowerCase().includes(q));
-    });
+    return filterConversations(s.conversations, s.activeAgent, s.searchQuery);
   },
 
   setSettings: (partial) => {
