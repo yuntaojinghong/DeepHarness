@@ -8,6 +8,10 @@
 ## [Unreleased]
 
 ### Added
+- **「一键打开官方 Web UI」改为后端打开**（`agent_open_web_ui` + 新增模块 `open_url.rs`）：dsh 0.1.5 起官方 Web UI 需要**每次启动重新生成**的一次性 token（不带 token 访问直接 401，带旧 token 同样 401），且该 token 要等进程起来约 5 秒后才打印出来。前端原先固定 `window.open("http://127.0.0.1:3080")`，在新版本上只会打开一个 401 页面；而「await 拿到地址再 open」又会丢失用户手势（可能被弹窗拦截、或落到一个拿不到句柄的新窗口上）。现由 Rust 侧从 dsh 运行日志中解析出本次有效的地址并在系统默认浏览器中打开，同时把 token 留在后端、错误信息与返回文案一律脱敏（`token=***`）。新增的 `open_url` 模块只接受回环地址且字符集白名单化的 URL（拒绝 `& | ^ " ' \`` 空格与反斜杠），避免 `cmd /C start` 重新解析命令行时留下 shell 注入面，并配套 5 个单元测试。
+- **同行依赖扫描器**（`scripts/lib/scan-peers.cjs`）：遍历已安装包的 `package.json`，按 Node 的向上查找规则与粗粒度 semver 判断列出未被满足的 `peerDependencies`（跳过 `optional`），输出 `名字@范围` 规格交给 npm 显式安装。
+- 前端契约层新增 `agentOpenWebUi()`（`src/lib/deepharness.ts`），并补了「浏览器预览下必须明确拒绝而非静默打开 401 页面」的测试。
+- **阶段 4 · DeepHarness Native Agent 核心**：
 - **阶段 4 · DeepHarness Native Agent 核心**：
   - 模型提供方抽象（`ModelProvider` trait）+ DeepSeek Chat Completions 实现，HTTP 走 Windows 原生 WinHTTP（系统 SChannel TLS，零新增编译负担）；
   - 多步规划器：目标 → 结构化 JSON 计划（工具步骤 / 纯回答步骤），非法输出带错误反馈自动重试一次，步骤数上限防失控；
@@ -24,9 +28,13 @@
   - 会话按 Agent 隔离：`Conversation` 新增 `agent` 字段（历史数据读取时统一兜底），切换 Agent 时会话列表、主视图与右侧面板整体切换，不跨 Agent 泄漏内容。
   - DeepHarness 任务控制台：目标输入 → 「生成计划」预览结构化步骤 → 「执行任务」展示逐步执行时间线（工具、结果、反思建议、重试与步骤修订标注）→ 任务总结；未启动 Worker 或未配置模型时给出明确引导而非静默失败。
   - DeepHarness 右侧面板：Worker 就绪状态（进程号、协议版本、崩溃原因）与启停、模型配置表单（落盘 + 热注入，API Key 只回显尾号，支持一键沿用对话侧已填密钥）、长期记忆库（统计 / 关键词检索 / 手动写入 / 单条删除）。
-  - 前端单元测试：新增 `src/lib/deepharness.test.ts` 与 `src/lib/storage.test.ts`（35 个用例，覆盖状态映射、错误归一化、截断与序列化辅助、会话字段兜底、模型去重、浏览器预览降级，以及存储不可用 / 数据损坏时的降级路径）。
+  - 前端单元测试：新增 `src/lib/deepharness.test.ts` 与 `src/lib/storage.test.ts`（36 个用例，覆盖状态映射、错误归一化、截断与序列化辅助、会话字段兜底、模型去重、浏览器预览降级与「Web UI 必须由后端打开」的守卫，以及存储不可用 / 数据损坏时的降级路径）。
 
 ### Changed
+- **随包资源版本升级**：Node 便携版 22.12.0 → **22.22.2**，`@deepseek-ai/dsh` → **0.1.5-rc.2**。dsh 的 code-runtime 使用 `node:module` 的 `stripTypeScriptTypes()`（Node 22.13 引入），22.12.0 下整个 Harness 会在加载期报 `does not provide an export named 'stripTypeScriptTypes'`；资源准备脚本现按 major.minor 校验随包 Node，版本不足会重新下载，不再要求手工删目录。
+- **资源准备脚本改为版本驱动**：「已就绪」判断新增版本维度，已装 dsh 与目标 `DSH_VERSION` 不一致时自动重装，升级路径不再被「已就绪」永久挡住。
+- **dsh 依赖安装改用 `--legacy-peer-deps`**：dsh 有 178 个互相声明的 `@deepseek-ai/*` 包，npm 的同行依赖解析在这张图上会卡死在 `placeDep` 阶段（实测 12 分钟无任何进展）。跳过自动同行解析后完整安装只需十几秒，代价是同行依赖不自动装，因此紧接着由 `scan-peers.cjs` 扫描缺失项并显式补齐（实测：扫描 520 个包、0 缺失）。
+- `AgentRuntime` trait 新增默认方法 `web_ui_url()`：约定实现必须返回**带鉴权参数、可直接打开**的地址，未就绪时返回 `None`。等待逻辑放在阻塞线程池上执行且不持有注册表锁，避免拖住另外两个 Agent 的状态查询。
 - **DeepHarness Worker 就绪状态改为单一来源**：`workerReadiness` 与 `refreshWorkerReadiness` 提升到全局 store，由 `App` 统一轮询，任务控制台与右侧面板只读结果。此前两处各自 `setInterval` 轮询同一个 `deepharness_status`，既重复发 IPC，又可能短暂呈现互相矛盾的结论。
 - **启动流程不再跳转官方 Web UI**：移除启动时 `window.location.href = "http://127.0.0.1:3080"` 与已不存在的 `start_dsh` 命令调用（该命令早已在重构中删除，此前会使每次启动都落到「启动失败」分支）。现在启动只做本机环境检测与 Agent 概览读取，失败也不阻塞进入界面，保证零配置用户直接可用。
 - **前端 CI 增加单元测试步骤**（`npm test`），与类型检查、构建并列。
@@ -35,6 +43,13 @@
 - CI：测试步骤改为 `cargo test --lib` + `cargo test --test public_api`；仅编译不运行的那一步改用 `--message-format=json` 把 cargo 实际产出的测试可执行文件路径写盘，避免被 Cargo 缓存还原回来的历史产物干扰；原先的「导入表诊断」替换为**应用清单校验**（直接解析 exe 的 `RT_MANIFEST` 资源并断言含 Common-Controls v6），由 `continue-on-error` 的哨兵升级为硬性失败，故障信息也从「没有上下文的退出码」变成明确的原因。
 
 ### Fixed
+- **官方 Web UI 在新版 dsh 上必然 401**：dsh 0.1.5 起 Web UI 需要每次启动重新生成的 token，原先固定打开基础地址只能得到 401 页面。现由后端解析带 token 的地址并打开（见 Added 第一条）。
+- **资源准备脚本的「Node 版本不足时替换失败」**：旧实现把解压结果 `mv` 到一个可能已存在的 `resources/node` 下，结果是 `resources/node/node-v22.22.2-win-x64/` —— 看着像成功，但 bin 位置全错、版本依旧过旧。现改为先校验新 Node 可执行、再把旧目录改名暂存并替换，失败回滚，保证不会只剩一个不可用的目录。
+- **资源准备脚本的「完好依赖树被判定为残缺」**：就绪判断原先递归 `find` 所有子目录，把包内部的 `dist/`、`lib/` 这类正常子目录当成「缺少 `package.json` 的残包」，于是每次都触发整棵重装（非幂等、每次白等 40 秒）。现只匹配真正的包目录形态（`node_modules/<name>` 与 `node_modules/@scope/<name>`）。
+- **资源准备脚本的「残缺依赖树被永久跳过」**：旧判断只看 `bin.js` 是否存在，一次被中断的 `npm install` 留下的坏树（实测 163 个包缺 `package.json`、60 个空目录、无 `package-lock.json`）会被判定为就绪而再不自愈，表现为 dsh 启动即 `Cannot find package 'js-yaml'`。现同时校验安装清单、包目录完整性与同行依赖完整性，任一不满足即整棵重建（就地补装会与删除策略打架、越修越坏）。
+- **资源准备脚本在 Git Bash 下的路径问题**：Windows 自带的 `curl` / PowerShell 不认 MSYS 风格路径（`/c/Users/...`），下载会以 `Failed to open the file ...: No such file or directory` 失败；把同一路径当参数传给原生 `node.exe` 会被解析成 `C:\c\Users\...`，导致 npm 直接 `MODULE_NOT_FOUND`。现下载/解压一律在临时目录内用相对路径进行，并把交给原生 exe 的路径经 `cygpath` 转换。
+- **同行依赖扫描器的诊断信息污染安装参数**：调用方误用 `2>&1` 合并 stderr 后，把 `[scan-peers] 扫描 520 个包，缺失同行依赖 0 个` 当成包规格传给 npm，报 `EINVALIDTAGNAME`。现只取 stdout 作为结果、stderr 落到独立文件仅用于报错，并把脚本内告警统一改为写 stderr（避免污染任何 `$(...)` 取值）。
+- **npm 调用不再依赖宿主机装过 Node**：统一经随包 Node 自带的 npm（`node.exe <npm-cli.js>`）调用，既保证 npm 与 node 版本匹配，也避免 Windows 上 `.cmd` 经 shell 转发带来的引号与编码问题。
 - **本机存储不可用时界面无法启动**：`storage.ts` 原先直接访问 `localStorage`，WebView 在隐私模式 / 存储被禁用时访问会**抛异常**（而非返回 `null`），异常会一路冒到 store 的初始化解，导致整个界面白屏。现统一经 `readRaw` / `writeRaw` / `readJson` 容错助手访问，读失败当无数据、写失败静默跳过，并补了对应的降级测试。
 - **非空目录递归删除在工作区内被误拒**：`native/tools.rs` 与 `fs_ops.rs` 都用未规范化的 `dirs.workspace` 去 `Path::strip_prefix` 一个已规范化的绝对路径，Windows 上因 `\\?\` 前缀 / 短名 / 大小写差异必然失配，导致工作区内的非空目录也无法递归删除。现统一改用新增的 `permissions::is_within`（两侧先规范化 + 大小写不敏感的前缀+分隔符匹配），并补了回归测试。
 - **Worker 未配置时的报错不指向根因**：`plan` / `run_task` / `remember` / `recall` / `forget` 都先校验请求载荷、后检查配置，未配置时返回的是「缺少 goal」这类字段错误。现改为配置类前置条件优先，报错明确提示先 `configure`。

@@ -3,6 +3,7 @@ import { AGENT_IDS } from "./env";
 import {
   AGENT_META,
   agentList,
+  agentOpenWebUi,
   agentStateLabel,
   agentStateTone,
   deepharnessStatus,
@@ -24,8 +25,12 @@ describe("AGENT_META", () => {
     expect(taskAgents).toEqual(["deepharness"]);
   });
 
-  it("gives the harness agent a loopback web ui url", () => {
-    expect(AGENT_META["deepseek-harness"].webUiUrl).toBe("http://127.0.0.1:3080");
+  it("gives the harness agent a loopback base url", () => {
+    // 这是**基础地址**，只用于展示。真正打开要走 agentOpenWebUi()：
+    // dsh 0.1.5 起每次都要求一个重新生成的一次性 token。
+    const url = AGENT_META["deepseek-harness"].webUiUrl;
+    expect(url).toBe("http://127.0.0.1:3080");
+    expect(url).not.toContain("token");
   });
 
   it("gives every agent a non-empty name and tagline", () => {
@@ -126,5 +131,11 @@ describe("browser preview fallback", () => {
 
   it("reports the worker as not running", async () => {
     await expect(deepharnessStatus()).resolves.toEqual({ running: false, configured: false });
+  });
+
+  it("refuses to open the official web ui outside the desktop shell", async () => {
+    // 打开动作必须由后端完成（token 与弹窗手势都在那一侧处理），
+    // 浏览器预览下只能明确拒绝，而不是静默打开一个 401 页面。
+    await expect(agentOpenWebUi("deepseek-harness")).rejects.toThrow(/桌面版/);
   });
 });

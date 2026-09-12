@@ -34,7 +34,12 @@ export interface AgentMeta {
   tagline: string;
   /** 该 Agent 是否具备任务控制台（规划 / 执行 / 记忆）能力。 */
   hasTaskConsole: boolean;
-  /** 该 Agent 是否拥有独立的可视化界面（官方 Web UI）。 */
+  /**
+   * 官方 Web UI 的**基础地址**，仅用于展示与「该 Agent 有独立界面」判断。
+   *
+   * 不要直接打开它：dsh 0.1.5 起需要每次启动重新生成的一次性 token，
+   * 不带 token 访问只会拿到 401。真正打开请走 `agentOpenWebUi()`。
+   */
   webUiUrl?: string;
 }
 
@@ -126,6 +131,23 @@ export async function agentStop(agent: AgentId): Promise<void> {
 export async function agentStatus(agent: AgentId): Promise<AgentStatusView> {
   if (!isTauri()) return { state: "stopped" };
   return invoke<AgentStatusView>("agent_status", { agent });
+}
+
+/**
+ * 用系统默认浏览器打开某个 Agent 的官方 Web UI。
+ *
+ * 由后端完成打开动作，原因有两条：
+ * 1. dsh 0.1.5 起 Web UI 需要一次性 token，且该 token 要等它启动几秒后
+ *    才打印出来 —— 前端「await 拿到地址再 window.open」既可能被弹窗
+ *    拦截，也可能落到一个拿不到句柄的新窗口上；
+ * 2. token 是本机临时凭据，留在 Rust 侧不流向前端。
+ *
+ * 返回**脱敏**后的地址（token 显示为 `***`），可直接用于提示文案。
+ * 未运行或地址尚未就绪时抛错（有界等待后给出明确原因）。
+ */
+export async function agentOpenWebUi(agent: AgentId): Promise<string> {
+  assertTauri("打开官方 Web UI");
+  return invoke<string>("agent_open_web_ui", { agent });
 }
 
 /** 浏览器预览下给出三个「已停止」的占位概览，保证界面可完整渲染。 */

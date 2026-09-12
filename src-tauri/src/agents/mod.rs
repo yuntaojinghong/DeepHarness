@@ -63,6 +63,18 @@ pub trait AgentRuntime: Send + Sync {
 
     /// 该 Agent 的隔离目录布局。
     fn dirs(&self) -> &AgentDirs;
+
+    /// 该 Agent 官方 Web UI 的**可直接打开**地址。
+    ///
+    /// 返回 `None` 表示没有独立 Web UI，或当前尚未就绪。
+    /// 两点实现约定：
+    /// - 地址里必须带上必要的鉴权参数（例如 dsh 0.1.5 起每次启动都会
+    ///   重新生成的 token），否则打开的是一个 401 页面；
+    /// - 该地址不一定在进程启动瞬间就已可用，实现可以做**有界等待**，
+    ///   但必须有明确上限，且未运行时要立即返回 `None`。
+    fn web_ui_url(&self) -> Option<String> {
+        None
+    }
 }
 
 #[cfg(test)]

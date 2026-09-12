@@ -150,6 +150,48 @@ pub fn agent_status(
     registry.status_of(&agent)
 }
 
+/// 打开某个 Agent 的官方 Web UI（用系统默认浏览器）。
+///
+/// 为什么由后端打开而不是前端 `window.open`：
+/// dsh 0.1.5 起 Web UI 需要一次性 token，而该 token 要等它启动几秒后
+/// 才打印出来。前端 `window.open` 必须在用户手势的同步栈里调用，
+/// 「await 拿到地址再 open」既可能被弹窗拦截，也可能落到一个拿不到
+/// 句柄的新窗口上；放在后端则只需一次点击 + 一段有界等待。
+/// 顺带把 token 留在了 Rust 侧，不流向前端。
+///
+/// 返回**脱敏后**的地址（token 显示为 `***`），供界面提示使用。
+///
+/// 两个刻意的设计：
+/// - **不持有注册表锁**去等待：地址解析最多可能等几秒，占着全局锁会
+///   拖住另外两个 Agent 的状态查询，违背「一个 Agent 卡住不影响其他」；
+/// - **放在阻塞线程池**上执行：同一个理由，不能占用主线程。
+#[tauri::command]
+pub async fn agent_open_web_ui(
+    registry: tauri::State<'_, AgentRegistry>,
+    agent: String,
+) -> AppResult<String> {
+    let runtime: Arc<dyn AgentRuntime> = {
+        let map = registry.get(&agent)?;
+        map.get(agent.as_str()).cloned()
+    };
+    let Some(runtime) = runtime else {
+        return Err(AppError::UnknownAgent(agent));
+    };
+
+    tauri::async_runtime::spawn_blocking(move || -> AppResult<String> {
+        let url = runtime.web_ui_url().ok_or_else(|| {
+            AppError::Other(format!(
+                "{} 的官方界面尚未就绪：请确认它正在运行，稍候几秒后再试",
+                runtime.display_name()
+            ))
+        })?;
+        crate::open_url::open_in_system_browser(&url)?;
+        Ok(crate::open_url::mask_token(&url))
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("打开官方 Web UI 失败: {e}")))?
+}
+
 // ---- DeepHarness Native Agent 专属命令 ----
 //
 // 注册表负责所有 Agent 的统一启停/状态；DeepHarness 的任务与记忆

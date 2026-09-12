@@ -15,6 +15,7 @@ mod error;
 mod fs_ops;
 mod logging;
 pub mod native;
+mod open_url;
 pub mod paths;
 pub mod permissions;
 mod sessions;
@@ -299,6 +300,7 @@ pub fn run() {
             agents::registry::agent_start,
             agents::registry::agent_stop,
             agents::registry::agent_status,
+            agents::registry::agent_open_web_ui,
             // DeepHarness Native Agent 命令
             agents::registry::deepharness_configure,
             agents::registry::deepharness_get_config,

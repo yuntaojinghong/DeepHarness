@@ -93,6 +93,38 @@ impl DshRuntime {
         port_alive(DSH_PORT)
     }
 
+    /// 读取日志并解析本次启动的 Web UI 地址（单次尝试，不等待）。
+    fn read_web_ui_url(&self) -> Option<String> {
+        let text = read_text_capped(&runtime_log_path(&self.dirs), LOG_SCAN_LIMIT)?;
+        extract_web_ui_url(&text, DSH_PORT)
+    }
+
+    /// 本次启动的 Web UI 地址（含一次性 token）。
+    ///
+    /// 未运行时立即返回 `None`（不做等待）；运行中则做有界轮询，
+    /// 因为 dsh 先绑定端口、之后才打印地址。
+    pub fn wait_web_ui_url(&self) -> Option<String> {
+        if !self.is_endpoint_alive() {
+            return None;
+        }
+        if let Some(url) = self.read_web_ui_url() {
+            return Some(url);
+        }
+        let deadline = std::time::Instant::now() + WEB_UI_URL_TIMEOUT;
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if !self.is_endpoint_alive() {
+                // 等待期间进程退出了：立刻放弃，不要空等到超时
+                return None;
+            }
+            if let Some(url) = self.read_web_ui_url() {
+                return Some(url);
+            }
+        }
+        tracing::warn!("未能从 dsh 运行日志中解析出 Web UI 地址（该版本可能不打印 token）");
+        None
+    }
+
     /// 读取最近 8KB 运行日志（前端日志面板用）。
     pub fn recent_log(&self) -> String {
         let path = runtime_log_path(&self.dirs);
@@ -254,6 +286,10 @@ impl crate::agents::AgentRuntime for DshRuntime {
     fn dirs(&self) -> &AgentDirs {
         &self.dirs
     }
+
+    fn web_ui_url(&self) -> Option<String> {
+        self.wait_web_ui_url()
+    }
 }
 
 /// dsh 运行日志路径。
@@ -264,6 +300,64 @@ pub fn runtime_log_path(dirs: &AgentDirs) -> PathBuf {
 /// 端口健康检查。
 pub fn port_alive(port: u16) -> bool {
     std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+}
+
+/// dsh 打印 Web UI 地址的两种主机写法。
+const WEB_UI_HOSTS: [&str; 2] = ["http://127.0.0.1:", "http://localhost:"];
+
+/// token 最短长度。真实 token 是 43 字符的 URL-safe base64；这里只要
+/// 求一个下界，用来过滤掉把畸形日志片段误当 token 的情况，同时不把
+/// dsh 将来可能调整长度写死。
+const TOKEN_MIN_LEN: usize = 16;
+
+/// 从日志开头读取的上限。
+///
+/// Web UI 地址在**启动阶段**就被打印（日志开头），而日志之后会持续增长
+/// —— 只读尾部会漏掉它。这里从头读并设上限，避免异常膨胀的日志拖垮调用方。
+const LOG_SCAN_LIMIT: u64 = 2 * 1024 * 1024;
+
+/// 等待 Web UI 地址出现的时间上限。
+///
+/// 实测 dsh 先绑定端口、约 5 秒后才打印带 token 的地址，因此
+/// 「端口可连」不等于「地址可用」，需要一段有界等待。
+const WEB_UI_URL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// 从 dsh 运行日志中取出**最近一次**打印的 Web UI 地址（含 token）。
+///
+/// 为什么必须从日志里取：dsh 0.1.5 起为 Web UI 增加了 token 鉴权，
+/// 不带 token 访问直接返回 401；而 token **每次启动都会重新生成**
+/// （实测同一个 DSH_HOME 连续两次启动拿到的 token 不同），所以既不能
+/// 写死地址，也不能缓存上一次的结果。
+///
+/// 日志跨多次启动累积，旧记录的 token 早已失效，因此只认最后一条。
+pub fn extract_web_ui_url(log: &str, port: u16) -> Option<String> {
+    let mut latest: Option<String> = None;
+    for line in log.lines() {
+        for host in WEB_UI_HOSTS {
+            let prefix = format!("{host}{port}/?token=");
+            let Some(start) = line.find(&prefix) else {
+                continue;
+            };
+            let token_start = start + prefix.len();
+            let token: String = line[token_start..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            if token.len() >= TOKEN_MIN_LEN {
+                latest = Some(format!("{}{}", &line[start..token_start], token));
+            }
+        }
+    }
+    latest
+}
+
+/// 读取文件开头的文本（上限 `cap` 字节，容忍在字符中间截断）。
+fn read_text_capped(path: &std::path::Path, cap: u64) -> Option<String> {
+    let file = File::open(path).ok()?;
+    let mut reader = file.take(cap);
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf).ok()?;
+    Some(String::from_utf8_lossy(&buf).to_string())
 }
 
 #[cfg(test)]
@@ -293,5 +387,54 @@ mod tests {
         let dirs = AgentDirs::from_root(PathBuf::from("X:/never"), "deepseek-harness");
         let rt = DshRuntime::new(dirs, None, None);
         assert_eq!(rt.recent_log(), String::new());
+    }
+
+    #[test]
+    fn web_ui_url_without_token_is_none() {
+        let log = "dsh web: http://127.0.0.1:3080\n";
+        assert_eq!(extract_web_ui_url(log, 3080), None);
+    }
+
+    #[test]
+    fn web_ui_url_extracts_token() {
+        let log = "dsh web: http://127.0.0.1:3080/?token=BXXfmmi_ZCnraBcWXgUfQLjebJLUzyQzh8lZEI36vbU\n";
+        assert_eq!(
+            extract_web_ui_url(log, 3080).as_deref(),
+            Some("http://127.0.0.1:3080/?token=BXXfmmi_ZCnraBcWXgUfQLjebJLUzyQzh8lZEI36vbU")
+        );
+    }
+
+    #[test]
+    fn web_ui_url_takes_the_last_occurrence() {
+        // 日志跨多次启动累积：只有最后一条的 token 还有效
+        let log = concat!(
+            "dsh web: http://127.0.0.1:3080/?token=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n",
+            "[info] 一些无关输出\n",
+            "dsh web: http://127.0.0.1:3080/?token=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB\n",
+        );
+        assert!(extract_web_ui_url(log, 3080).unwrap().ends_with("BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"));
+    }
+
+    #[test]
+    fn web_ui_url_ignores_other_ports_and_short_tokens() {
+        assert_eq!(extract_web_ui_url("http://127.0.0.1:3099/?token=AAAAAAAAAAAAAAAAAAAA\n", 3080), None);
+        assert_eq!(extract_web_ui_url("http://127.0.0.1:3080/?token=short\n", 3080), None);
+    }
+
+    #[test]
+    fn web_ui_url_tolerates_ansi_and_trailing_noise() {
+        let log = "\u{1b}[36mdsh web: http://localhost:3080/?token=CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC\u{1b}[0m 已就绪\n";
+        assert_eq!(
+            extract_web_ui_url(log, 3080).as_deref(),
+            Some("http://localhost:3080/?token=CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
+        );
+    }
+
+    #[test]
+    fn web_ui_url_none_when_not_running() {
+        // 端口没人监听时不做等待，直接返回 None（避免前端按钮空等 20 秒）
+        let dirs = AgentDirs::from_root(PathBuf::from("X:/never"), "deepseek-harness");
+        let rt = DshRuntime::new(dirs, None, None);
+        assert!(rt.web_ui_url().is_none());
     }
 }

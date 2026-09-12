@@ -11,7 +11,7 @@ import {
 } from "./Icons";
 import LogoMark from "./Logo";
 import ModelIcon from "./ModelIcon";
-import { AGENT_META, agentStateLabel, agentStateTone, agentStart, agentStop, describeError } from "../lib/deepharness";
+import { AGENT_META, agentOpenWebUi, agentStateLabel, agentStateTone, agentStart, agentStop, describeError } from "../lib/deepharness";
 
 export default function TitleBar() {
   const models = useAppStore((s) => s.models);
@@ -34,6 +34,8 @@ export default function TitleBar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [powerBusy, setPowerBusy] = useState(false);
   const [powerError, setPowerError] = useState<string | null>(null);
+  const [webUiBusy, setWebUiBusy] = useState(false);
+  const [webUiHint, setWebUiHint] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const selected = models.find((m) => m.id === selectedId) ?? models[0];
@@ -49,6 +51,11 @@ export default function TitleBar() {
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
+
+  // 切换 Agent 后清掉上一个 Agent 的错误提示，避免张冠李戴。
+  useEffect(() => {
+    setWebUiHint(null);
+  }, [activeAgent]);
 
   const toggleAgent = async () => {
     if (powerBusy) return;
@@ -69,8 +76,26 @@ export default function TitleBar() {
   };
 
   // 官方 Web UI 只在 Harness 运行起来后才有意义；未运行时按钮禁用并说明原因。
+  //
+  // 打开动作交给后端：dsh 0.1.5 起 Web UI 需要每次启动重新生成的一次性
+  // token，而它在进程起来几秒后才打印出来。前端 await 之后再
+  // `window.open` 既可能被弹窗拦截，也可能拿到一个无法再改地址的新窗口。
   const webUi = meta.webUiUrl;
   const canOpenWebUi = Boolean(webUi) && running;
+
+  const openWebUi = async () => {
+    if (webUiBusy || !canOpenWebUi) return;
+    setWebUiBusy(true);
+    setWebUiHint(null);
+    try {
+      // 成功后不再提示：浏览器弹出来本身就是反馈。
+      await agentOpenWebUi(activeAgent);
+    } catch (e) {
+      setWebUiHint(describeError(e));
+    } finally {
+      setWebUiBusy(false);
+    }
+  };
 
   const envState = !env ? "busy" : [env.python, env.node, env.git].every((r) => r?.installed) ? "ok" : "warn";
   const envLabel = !env ? "环境检测中…" : [env.python, env.node, env.git].every((r) => r?.installed) ? "环境就绪" : "环境待补齐";
@@ -147,17 +172,23 @@ export default function TitleBar() {
       {webUi && (
         <button
           className="btn-icon btn-ghost"
-          title={canOpenWebUi ? "在浏览器中打开官方 Web UI" : "启动后可用"}
-          disabled={!canOpenWebUi}
-          onClick={() => window.open(webUi, "_blank", "noopener,noreferrer")}
+          title={
+            !canOpenWebUi
+              ? "启动后可用"
+              : webUiBusy
+                ? "正在等待官方界面就绪…"
+                : "在浏览器中打开官方 Web UI"
+          }
+          disabled={!canOpenWebUi || webUiBusy}
+          onClick={openWebUi}
         >
           <ExternalLinkIcon />
         </button>
       )}
 
-      {powerError && (
-        <span className="titlebar-error" title={powerError}>
-          {powerError}
+      {(powerError || webUiHint) && (
+        <span className="titlebar-error" title={powerError ?? webUiHint ?? ""}>
+          {powerError ?? webUiHint}
         </span>
       )}
 
