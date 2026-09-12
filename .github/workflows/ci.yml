@@ -32,6 +32,12 @@ jobs:
   rust:
     name: Rust 后端编译
     runs-on: windows-latest
+    env:
+      # Windows runner 上的 Python 默认按 cp1252（charmap）编码 stdout，
+      # 步骤里任何中文输出都会抛 UnicodeEncodeError 并被判为失败。
+      # 强制 UTF-8 模式，与下面各 python 步骤里的 reconfigure 形成双保险。
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 
@@ -92,6 +98,10 @@ jobs:
         run: |
           import json, os, subprocess, sys
 
+          # 不依赖 runner 的默认编码：显式切 UTF-8（见 job 级 env 的说明）。
+          sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+          sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
           TARGETS = [["--lib"], ["--test", "public_api"]]
           executables = []
 
@@ -149,6 +159,11 @@ jobs:
         shell: python
         run: |
           import os, struct, sys
+
+          # 不依赖 runner 的默认编码：显式切 UTF-8（见 job 级 env 的说明）。
+          # 否则校验通过时的中文成功提示反而会把步骤打成失败。
+          sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+          sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
           LIST = "target/debug/deps/ci-test-binaries.txt"
           RT_MANIFEST = 24
