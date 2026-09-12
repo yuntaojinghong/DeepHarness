@@ -14,8 +14,14 @@
 
 use crate::error::{AppError, AppResult};
 
-/// 允许打开的主机前缀（只允许本机回环）。
+/// 允许打开的回环主机前缀（dsh 等本机服务）。
 const ALLOWED_HOST_PREFIXES: [&str; 2] = ["http://127.0.0.1:", "http://localhost:"];
+
+/// 允许打开的公网站点白名单（仅 https）。
+///
+/// 采用白名单而不是「放行任意 https」：该命令可被前端任意调用，
+/// 白名单把「渲染层万一被注入」时的利用面压到最小。新增站点需在此登记。
+const ALLOWED_WEB_HOSTS: [&str; 2] = ["github.com", "platform.deepseek.com"];
 
 /// URL 中允许出现的字符。
 ///
@@ -29,8 +35,8 @@ fn is_allowed_char(c: char) -> bool {
         )
 }
 
-/// 该 URL 是否可以被安全地交给系统浏览器打开。
-pub fn is_safe_external_url(url: &str) -> bool {
+/// 是否为允许打开的本机回环地址。
+fn is_loopback_url(url: &str) -> bool {
     // 注意 `*prefix`：数组 `.iter()` 产出的是 `&&str`，而 `strip_prefix` 的
     // 模式参数接受的是 `&str`（`&&str` 要靠 std 的一个特例实现兜住，
     // 显式解引用更稳）。
@@ -41,11 +47,37 @@ pub fn is_safe_external_url(url: &str) -> bool {
         return false;
     };
     // 前缀之后必须还有端口号，避免 `http://127.0.0.1:` 这种半截地址
-    let port_digits = rest.chars().take_while(|c| c.is_ascii_digit()).count();
-    if port_digits == 0 {
+    rest.chars().take_while(|c| c.is_ascii_digit()).count() > 0
+}
+
+/// 是否为白名单内的公网 https 地址。
+fn is_allowed_web_url(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    // host 截止到路径 / 查询 / 片段的第一个分隔符，再去掉可能的端口
+    let host = rest
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("");
+    if host.is_empty() {
         return false;
     }
-    url.chars().all(is_allowed_char)
+    ALLOWED_WEB_HOSTS
+        .iter()
+        .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+}
+
+/// 该 URL 是否可以被安全地交给系统浏览器打开。
+pub fn is_safe_external_url(url: &str) -> bool {
+    // 字符白名单对两类地址都适用；先过这一关，后面就不必再担心 shell 元字符。
+    if !url.chars().all(is_allowed_char) {
+        return false;
+    }
+    is_loopback_url(url) || is_allowed_web_url(url)
 }
 
 /// 在系统默认浏览器中打开一个回环地址。
@@ -84,6 +116,17 @@ pub fn mask_token(url: &str) -> String {
         Some(idx) => format!("{}token=***", &url[..idx]),
         None => url.to_string(),
     }
+}
+
+/// 在系统默认浏览器中打开一个外部链接（回环地址或白名单内的公网站点）。
+///
+/// 抽成独立命令的理由与官方 Web UI 相同：`<a target="_blank">` 与
+/// `window.open` 在 Tauri WebView 里的行为并不等价于浏览器 —— 前者可能
+/// 在 WebView 内部打开、把应用界面替换掉。统一走后端 `start` 才能保证
+/// 「一定落到用户的默认浏览器」，并且顺带获得 URL 校验。
+#[tauri::command]
+pub fn open_external_url(url: String) -> AppResult<()> {
+    open_in_system_browser(&url)
 }
 
 #[cfg(test)]
@@ -127,6 +170,46 @@ mod tests {
         ] {
             assert!(!is_safe_external_url(bad), "应当拒绝：{bad}");
         }
+    }
+
+    #[test]
+    fn accepts_whitelisted_web_urls() {
+        assert!(is_safe_external_url(
+            "https://github.com/yuntaojinghong/DeepHarness"
+        ));
+        assert!(is_safe_external_url(
+            "https://github.com/yuntaojinghong/DeepHarness/releases"
+        ));
+        assert!(is_safe_external_url("https://github.com/"));
+        // 白名单站点下的子域一并放行
+        assert!(is_safe_external_url("https://gist.github.com/abc"));
+        assert!(is_safe_external_url("https://platform.deepseek.com/usage"));
+    }
+
+    #[test]
+    fn rejects_web_urls_outside_the_whitelist() {
+        for bad in [
+            "https://example.com/",
+            "http://github.com/",          // 公网站点必须 https
+            "https://evilgithub.com/",     // 后缀必须落在 `.github.com` 上
+            "https://github.com.evil.com/", // 不能用白名单域名做前缀
+            "https://",
+        ] {
+            assert!(!is_safe_external_url(bad), "应当拒绝：{bad}");
+        }
+    }
+
+    #[test]
+    fn rejects_shell_metacharacters_in_web_urls_too() {
+        // 字符白名单对公网地址同样生效（`&` 会被 cmd 重新解析）
+        assert!(!is_safe_external_url("https://github.com/a?b=1&c=2"));
+        assert!(!is_safe_external_url("https://github.com/a|whoami"));
+    }
+
+    #[test]
+    fn open_external_url_rejects_unsafe_targets() {
+        assert!(open_external_url("http://example.com/".to_string()).is_err());
+        assert!(open_external_url("https://evil.com/".to_string()).is_err());
     }
 
     #[test]

@@ -8,10 +8,11 @@
 ## [Unreleased]
 
 ### Added
-- **「一键打开官方 Web UI」改为后端打开**（`agent_open_web_ui` + 新增模块 `open_url.rs`）：dsh 0.1.5 起官方 Web UI 需要**每次启动重新生成**的一次性 token（不带 token 访问直接 401，带旧 token 同样 401），且该 token 要等进程起来约 5 秒后才打印出来。前端原先固定 `window.open("http://127.0.0.1:3080")`，在新版本上只会打开一个 401 页面；而「await 拿到地址再 open」又会丢失用户手势（可能被弹窗拦截、或落到一个拿不到句柄的新窗口上）。现由 Rust 侧从 dsh 运行日志中解析出本次有效的地址并在系统默认浏览器中打开，同时把 token 留在后端、错误信息与返回文案一律脱敏（`token=***`）。新增的 `open_url` 模块只接受回环地址且字符集白名单化的 URL（拒绝 `& | ^ " ' \`` 空格与反斜杠），避免 `cmd /C start` 重新解析命令行时留下 shell 注入面，并配套 5 个单元测试。
+- **「一键打开官方 Web UI」改为后端打开**（`agent_open_web_ui` + 新增模块 `open_url.rs`）：dsh 0.1.5 起官方 Web UI 需要**每次启动重新生成**的一次性 token（不带 token 访问直接 401，带旧 token 同样 401），且该 token 要等进程起来约 5 秒后才打印出来。前端原先固定 `window.open("http://127.0.0.1:3080")`，在新版本上只会打开一个 401 页面；而「await 拿到地址再 open」又会丢失用户手势（可能被弹窗拦截、或落到一个拿不到句柄的新窗口上）。现由 Rust 侧从 dsh 运行日志中解析出本次有效的地址并在系统默认浏览器中打开，同时把 token 留在后端、错误信息与返回文案一律脱敏（`token=***`）。新增的 `open_url` 模块只接受回环地址且字符集白名单化的 URL（拒绝 `& | ^ " ' \`` 空格与反斜杠），避免 `cmd /C start` 重新解析命令行时留下 shell 注入面，并配套 11 个单元测试。
 - **同行依赖扫描器**（`scripts/lib/scan-peers.cjs`）：遍历已安装包的 `package.json`，按 Node 的向上查找规则与粗粒度 semver 判断列出未被满足的 `peerDependencies`（跳过 `optional`），输出 `名字@范围` 规格交给 npm 显式安装。
 - 前端契约层新增 `agentOpenWebUi()`（`src/lib/deepharness.ts`），并补了「浏览器预览下必须明确拒绝而非静默打开 401 页面」的测试。
-- **阶段 4 · DeepHarness Native Agent 核心**：
+- **「支持作者」入口**（标题栏爱心按钮 → `SupportModal`）：一个弹窗收纳两种支持方式 ——「去点 Star」（跳转仓库主页）与「请作者喝杯咖啡」（微信赞赏码，直接可扫）。赞赏码由原图裁出纯二维码面板后按最近邻放大（`src/assets/support-qrcode.png`，860×860），避免把原图里的浅色边框与色条带进深色主题；图片底色固定为白（不能用主题变量，否则会压掉码的对比度导致识别失败）。链接与作者署名集中在 `src/lib/links.ts`，含 9 个单元测试（其中一项与 Rust 侧白名单做**跨层契约校验**，防止两端各自放宽后悄悄偏离）。
+- **`open_url` 模块扩展公网白名单**：新增 `open_external_url` 命令，允许 `https://github.com` 与 `https://platform.deepseek.com` 及其子域（仅 https、host 精确匹配或 `.` 后缀，`https://github.com.evil.com` 与 `https://evilgithub.com` 均被拒），并补 6 个测试。前端原先用 `<a target="_blank">` / `window.open` 打开 GitHub 与更新下载页，在 Tauri WebView 下可能被 WebView 自己接管（替换应用界面）或直接无效；现统一走后端交给系统浏览器。
 - **阶段 4 · DeepHarness Native Agent 核心**：
   - 模型提供方抽象（`ModelProvider` trait）+ DeepSeek Chat Completions 实现，HTTP 走 Windows 原生 WinHTTP（系统 SChannel TLS，零新增编译负担）；
   - 多步规划器：目标 → 结构化 JSON 计划（工具步骤 / 纯回答步骤），非法输出带错误反馈自动重试一次，步骤数上限防失控；
@@ -28,7 +29,7 @@
   - 会话按 Agent 隔离：`Conversation` 新增 `agent` 字段（历史数据读取时统一兜底），切换 Agent 时会话列表、主视图与右侧面板整体切换，不跨 Agent 泄漏内容。
   - DeepHarness 任务控制台：目标输入 → 「生成计划」预览结构化步骤 → 「执行任务」展示逐步执行时间线（工具、结果、反思建议、重试与步骤修订标注）→ 任务总结；未启动 Worker 或未配置模型时给出明确引导而非静默失败。
   - DeepHarness 右侧面板：Worker 就绪状态（进程号、协议版本、崩溃原因）与启停、模型配置表单（落盘 + 热注入，API Key 只回显尾号，支持一键沿用对话侧已填密钥）、长期记忆库（统计 / 关键词检索 / 手动写入 / 单条删除）。
-  - 前端单元测试：新增 `src/lib/deepharness.test.ts` 与 `src/lib/storage.test.ts`（36 个用例，覆盖状态映射、错误归一化、截断与序列化辅助、会话字段兜底、模型去重、浏览器预览降级与「Web UI 必须由后端打开」的守卫，以及存储不可用 / 数据损坏时的降级路径）。
+  - 前端单元测试：新增 `src/lib/deepharness.test.ts`、`src/lib/storage.test.ts` 与 `src/lib/links.test.ts`（45 个用例，覆盖状态映射、错误归一化、截断与序列化辅助、会话字段兜底、模型去重、浏览器预览降级与「Web UI 必须由后端打开」的守卫、对外链接与后端白名单的跨层一致性，以及存储不可用 / 数据损坏时的降级路径）。
 
 ### Changed
 - **随包资源版本升级**：Node 便携版 22.12.0 → **22.22.2**，`@deepseek-ai/dsh` → **0.1.5-rc.2**。dsh 的 code-runtime 使用 `node:module` 的 `stripTypeScriptTypes()`（Node 22.13 引入），22.12.0 下整个 Harness 会在加载期报 `does not provide an export named 'stripTypeScriptTypes'`；资源准备脚本现按 major.minor 校验随包 Node，版本不足会重新下载，不再要求手工删目录。

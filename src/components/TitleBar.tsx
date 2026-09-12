@@ -4,6 +4,7 @@ import {
   ChevronDownIcon,
   ExternalLinkIcon,
   GearIcon,
+  HeartIcon,
   MoonIcon,
   PanelLeftIcon,
   PanelRightIcon,
@@ -26,6 +27,7 @@ export default function TitleBar() {
   const setContextOpen = useAppStore((s) => s.setContextOpen);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
   const setEnvOpen = useAppStore((s) => s.setEnvOpen);
+  const setSupportOpen = useAppStore((s) => s.setSupportOpen);
 
   const activeAgent = useAppStore((s) => s.activeAgent);
   const agents = useAppStore((s) => s.agents);
@@ -203,6 +205,10 @@ export default function TitleBar() {
 
       <button className="btn-icon btn-ghost" title="右侧面板" onClick={() => setContextOpen(!contextOpen)}>
         <PanelRightIcon />
+      </button>
+
+      <button className="btn-icon btn-ghost" title="支持作者" onClick={() => setSupportOpen(true)}>
+        <HeartIcon />
       </button>
 
       <button className="btn-icon btn-ghost" title="设置" onClick={() => setSettingsOpen(true)}>

@@ -301,6 +301,8 @@ pub fn run() {
             agents::registry::agent_stop,
             agents::registry::agent_status,
             agents::registry::agent_open_web_ui,
+            // 系统级能力
+            open_url::open_external_url,
             // DeepHarness Native Agent 命令
             agents::registry::deepharness_configure,
             agents::registry::deepharness_get_config,

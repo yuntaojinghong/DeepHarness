@@ -120,6 +120,29 @@ export const PowerIcon = ({ size = 16 }: IconProps) => (
   </svg>
 );
 
+/** 爱心：支持作者入口。 */
+export const HeartIcon = ({ size = 16 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M12 20s-7-4.4-7-9.3A4.2 4.2 0 0 1 12 8a4.2 4.2 0 0 1 7 2.7C19 15.6 12 20 12 20Z" />
+  </svg>
+);
+
+/** 星标：去 GitHub 点 Star。 */
+export const StarIcon = ({ size = 16 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="m12 4 2.5 5.1 5.5.8-4 3.9.95 5.5L12 16.7 7.05 19.3 8 13.8l-4-3.9 5.5-.8L12 4Z" />
+  </svg>
+);
+
+/** 咖啡杯：赞赏 / 投喂。 */
+export const CoffeeIcon = ({ size = 16 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M4 9h12v5.5A3.5 3.5 0 0 1 12.5 18h-5A3.5 3.5 0 0 1 4 14.5V9Z" />
+    <path d="M16 10.5h1.8a2.2 2.2 0 0 1 0 4.4H16" />
+    <path d="M7 3.5v2M10.5 3v2.5M14 3.5v2" />
+  </svg>
+);
+
 export const ExternalLinkIcon = ({ size = 16 }: IconProps) => (
   <svg {...base(size)}>
     <path d="M13 4h7v7" />

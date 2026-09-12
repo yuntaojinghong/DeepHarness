@@ -7,8 +7,10 @@ import ContextPanel from "./components/ContextPanel";
 import SettingsModal from "./components/SettingsModal";
 import EnvModal from "./components/EnvModal";
 import WelcomeModal from "./components/WelcomeModal";
+import SupportModal from "./components/SupportModal";
 import SplashScreen from "./components/SplashScreen";
 import { checkEnv, isTauri } from "./lib/env";
+import { openExternalUrlSafe } from "./lib/links";
 
 export default function App() {
   const theme = useAppStore((s) => s.settings.theme);
@@ -24,6 +26,7 @@ export default function App() {
   const activeAgent = useAppStore((s) => s.activeAgent);
   const welcomeOpen = useAppStore((s) => s.welcomeOpen);
   const setWelcomeOpen = useAppStore((s) => s.setWelcomeOpen);
+  const supportOpen = useAppStore((s) => s.supportOpen);
   const hasKey = useAppStore((s) => Object.values(s.settings.apiKeys).some((k) => k.trim()));
 
   const [booting, setBooting] = useState(true);
@@ -31,6 +34,7 @@ export default function App() {
   const [bootStatus, setBootStatus] = useState("正在启动 DeepHarness…");
   const [bootError, setBootError] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{ version: string; url: string } | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     hydrate();
@@ -169,10 +173,31 @@ export default function App() {
           <span>
             发现新版本 <b>{updateInfo.version}</b>
           </span>
-          <a href={updateInfo.url} target="_blank" rel="noreferrer">
+          {/* 不走 <a target="_blank">：Tauri WebView 可能把链接自己接管，
+              导致应用界面被替换掉。统一由后端交给系统浏览器打开。 */}
+          <button
+            className="btn btn-ghost"
+            style={{ fontSize: 12 }}
+            onClick={async () => {
+              const message = await openExternalUrlSafe(updateInfo.url);
+              setUpdateError(message);
+            }}
+          >
             前往下载
-          </a>
-          <button className="btn-icon btn-ghost" onClick={() => setUpdateInfo(null)} title="关闭">
+          </button>
+          {updateError && (
+            <span className="titlebar-error" title={updateError}>
+              {updateError}
+            </span>
+          )}
+          <button
+            className="btn-icon btn-ghost"
+            onClick={() => {
+              setUpdateInfo(null);
+              setUpdateError(null);
+            }}
+            title="关闭"
+          >
             ×
           </button>
         </div>
@@ -181,6 +206,7 @@ export default function App() {
       {welcomeOpen && <WelcomeModal />}
       {settingsOpen && <SettingsModal />}
       {envOpen && <EnvModal />}
+      {supportOpen && <SupportModal />}
     </div>
   );
 }

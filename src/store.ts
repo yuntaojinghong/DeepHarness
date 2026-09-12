@@ -71,6 +71,7 @@ interface AppState {
   settingsOpen: boolean;
   envOpen: boolean;
   welcomeOpen: boolean;
+  supportOpen: boolean;
   searchQuery: string;
   hydrated: boolean;
 
@@ -104,6 +105,7 @@ interface AppState {
   setSettingsOpen: (v: boolean) => void;
   setEnvOpen: (v: boolean) => void;
   setWelcomeOpen: (v: boolean) => void;
+  setSupportOpen: (v: boolean) => void;
   setSearchQuery: (q: string) => void;
 }
 
@@ -130,6 +132,7 @@ export const useAppStore = create<AppState>((set, get) => {
   settingsOpen: false,
   envOpen: false,
   welcomeOpen: false,
+  supportOpen: false,
   searchQuery: "",
   hydrated: false,
 
@@ -339,6 +342,7 @@ export const useAppStore = create<AppState>((set, get) => {
   setSettingsOpen: (v) => set({ settingsOpen: v }),
   setEnvOpen: (v) => set({ envOpen: v }),
   setWelcomeOpen: (v) => set({ welcomeOpen: v }),
+  setSupportOpen: (v) => set({ supportOpen: v }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   };
 });
