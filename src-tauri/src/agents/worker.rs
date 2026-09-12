@@ -333,6 +333,9 @@ fn handle_configure(payload: &serde_json::Value, state: &mut WorkerState) -> App
 }
 
 fn handle_plan(payload: &serde_json::Value, state: &WorkerState) -> AppResult<Plan> {
+    // 先检查配置再校验载荷：Worker 未 configure 时，"请先 configure" 比
+    // "缺少 goal" 更能指导调用方下一步动作（字段缺失可能在配置到位后消失）。
+    let provider = state.require_provider()?;
     let goal = payload
         .get("goal")
         .and_then(|v| v.as_str())
@@ -341,11 +344,14 @@ fn handle_plan(payload: &serde_json::Value, state: &WorkerState) -> AppResult<Pl
         .get("context")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let provider = state.require_provider()?;
     Planner::new(provider).make_plan(goal, context)
 }
 
 fn handle_run_task(payload: &serde_json::Value, state: &WorkerState) -> AppResult<crate::native::executor::TaskOutcome> {
+    // 同上：配置类前置条件优先于载荷校验。
+    let provider = state.require_provider()?;
+    let ctx = state.require_tools()?;
+    let memory = state.require_memory()?;
     let goal = payload
         .get("goal")
         .and_then(|v| v.as_str())
@@ -354,13 +360,11 @@ fn handle_run_task(payload: &serde_json::Value, state: &WorkerState) -> AppResul
         .get("context")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let provider = state.require_provider()?;
-    let ctx = state.require_tools()?;
-    let memory = state.require_memory()?;
     TaskRunner::new(provider, ctx, memory).run(goal, context)
 }
 
 fn handle_remember(payload: &serde_json::Value, state: &WorkerState) -> AppResult<i64> {
+    let memory = state.require_memory()?;
     let kind = payload
         .get("kind")
         .and_then(|v| v.as_str())
@@ -378,10 +382,11 @@ fn handle_remember(payload: &serde_json::Value, state: &WorkerState) -> AppResul
         .get("importance")
         .and_then(|v| v.as_f64())
         .unwrap_or(0.5);
-    state.require_memory()?.remember(kind, content, &tags, importance)
+    memory.remember(kind, content, &tags, importance)
 }
 
 fn handle_recall(payload: &serde_json::Value, state: &WorkerState) -> AppResult<Vec<Memory>> {
+    let memory = state.require_memory()?;
     let query = payload
         .get("query")
         .and_then(|v| v.as_str())
@@ -390,15 +395,16 @@ fn handle_recall(payload: &serde_json::Value, state: &WorkerState) -> AppResult<
         .get("limit")
         .and_then(|v| v.as_u64())
         .unwrap_or(5) as usize;
-    state.require_memory()?.recall(query, limit)
+    memory.recall(query, limit)
 }
 
 fn handle_forget(payload: &serde_json::Value, state: &WorkerState) -> AppResult<bool> {
+    let memory = state.require_memory()?;
     let id = payload
         .get("id")
         .and_then(|v| v.as_i64())
         .ok_or_else(|| AppError::Other("缺少 id".to_string()))?;
-    state.require_memory()?.forget(id)
+    memory.forget(id)
 }
 
 fn write_line(output: &mut dyn std::io::Write, line: &str) -> std::io::Result<()> {
