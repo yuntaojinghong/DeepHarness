@@ -83,6 +83,10 @@ jobs:
         working-directory: src-tauri
         run: cargo check --all-targets
 
+      - name: 编译测试二进制（不运行）
+        working-directory: src-tauri
+        run: cargo test --no-run
+
       - name: 就位测试所需的原生 DLL
         shell: pwsh
         working-directory: src-tauri
@@ -94,6 +98,155 @@ jobs:
           Get-ChildItem -Path target/debug/build -Recurse -Filter "WebView2Loader.dll" |
             ForEach-Object { Copy-Item $_.FullName -Destination target/debug/deps -Force }
           Get-ChildItem target/debug/deps -Filter "WebView2Loader.dll" | ForEach-Object { $_.FullName }
+
+      - name: 诊断测试二进制导入表
+        working-directory: src-tauri
+        shell: python
+        run: |
+          import ctypes, glob, os, struct, sys
+
+          EXE_DIR = os.path.abspath("target/debug/deps")
+          SYSTEM32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+          failures = []
+          visited = set()
+
+          def read_pe(path):
+              data = open(path, "rb").read()
+              e = struct.unpack_from("<I", data, 0x3C)[0]
+              if data[e:e+4] != b"PE\x00\x00":
+                  raise ValueError("not a PE file")
+              machine, nsec, _, _, _, szopt, _ = struct.unpack_from("<HHIIIHH", data, e+4)
+              opt = e + 24
+              magic = struct.unpack_from("<H", data, opt)[0]
+              ddir = opt + (112 if magic == 0x20B else 96)
+              dirs = [struct.unpack_from("<II", data, ddir+i*8) for i in range(16)]
+              secoff = opt + szopt
+              secs = []
+              for i in range(nsec):
+                  o = secoff + i*40
+                  vs, va, rs, pr = struct.unpack_from("<IIII", data, o+8)
+                  secs.append((va, max(vs, rs), pr))
+              def r2o(rva):
+                  for va, sz, pr in secs:
+                      if va <= rva < va + sz:
+                          return pr + (rva - va)
+                  return None
+              return data, machine, dirs, r2o
+
+          def cstr(data, off):
+              return data[off:data.index(b"\x00", off)].decode("utf-8", "replace")
+
+          def parse_imports(path):
+              data, machine, dirs, r2o = read_pe(path)
+              step = 8 if machine == 0x8664 else 4
+              ordflag = 1 << 63 if step == 8 else 1 << 31
+              fmt = "<Q" if step == 8 else "<I"
+              def thunks(rva):
+                  out = []
+                  o = r2o(rva)
+                  if o is None:
+                      return out
+                  for i in range(200000):
+                      v = struct.unpack_from(fmt, data, o + i*step)[0]
+                      if v == 0:
+                          break
+                      if v & ordflag:
+                          out.append(int(v & 0xFFFF))
+                      else:
+                          no = r2o(v & 0x7FFFFFFF)
+                          if no is not None:
+                              out.append(cstr(data, no + 2))
+                  return out
+              result = {}
+              rva = dirs[1][0]
+              if rva:
+                  o = r2o(rva)
+                  while True:
+                      oft, _, _, nrv, ft = struct.unpack_from("<IIIII", data, o)
+                      if oft == 0 and nrv == 0 and ft == 0:
+                          break
+                      dll = cstr(data, r2o(nrv)).lower()
+                      result[dll] = thunks(oft or ft)
+                      o += 20
+              rva = dirs[13][0]
+              if rva:
+                  o = r2o(rva)
+                  while True:
+                      gr, nrv, _, iat, pint = struct.unpack_from("<IIIII", data, o)
+                      if gr == 0 and nrv == 0:
+                          break
+                      dll = cstr(data, r2o(nrv)).lower()
+                      r = pint or iat
+                      if r:
+                          result.setdefault(dll, []).extend(thunks(r))
+                      o += 32
+              return machine, result
+
+          def find_dll(name):
+              p = os.path.join(EXE_DIR, name)
+              if os.path.exists(p):
+                  return p
+              p = os.path.join(SYSTEM32, name)
+              if os.path.exists(p):
+                  return p
+              return None
+
+          def check_dll(name, funcs, depth, tag):
+              key = (name.lower(), depth > 0)
+              if key in visited:
+                  return
+              visited.add(key)
+              path = find_dll(name)
+              note = ""
+              if path is None:
+                  note = " (apiset/loader-resolved)"
+                  if tag == "static":
+                      print("[static] %s%s: %d imports" % (name, note, len(funcs)))
+              else:
+                  print("[%s] %s -> %s (%d imports)" % (tag, name, path, len(funcs)))
+              if path is not None and depth > 0:
+                  try:
+                      m2, imp2 = parse_imports(path)
+                      if m2 != 0x8664:
+                          failures.append("ARCH MISMATCH %s: machine=0x%x" % (name, m2))
+                      for d2, f2 in imp2.items():
+                          check_dll(d2, f2, depth - 1, "dep")
+                  except Exception as exc:
+                      print("    (skip parse %s: %s)" % (name, exc))
+              try:
+                  lib = ctypes.WinDLL(path or name)
+                  for f in funcs:
+                      try:
+                          if isinstance(f, int):
+                              lib[f]
+                          else:
+                              getattr(lib, f)
+                      except AttributeError:
+                          failures.append("ENTRY POINT MISSING: %s!%s" % (name, f))
+                      except OSError as exc:
+                          failures.append("SYMBOL ERROR: %s!%s -> %s" % (name, f, exc))
+              except OSError as exc:
+                  failures.append("LOAD FAILED: %s -> %s" % (name, exc))
+
+          exes = sorted(glob.glob(os.path.join(EXE_DIR, "deepharness_lib-*.exe")))
+          if not exes:
+              sys.exit("no deepharness_lib test exe found in " + EXE_DIR)
+          target = exes[-1]
+          machine, imports = parse_imports(target)
+          print("test exe:", target)
+          print("machine: 0x%x, imported DLLs: %d" % (machine, len(imports)))
+          for d, fs in sorted(imports.items()):
+              print("  %-55s %3d symbols" % (d, len(fs)))
+          print("--- resolving every import (static + 1-level deps) ---")
+          for d, fs in sorted(imports.items()):
+              check_dll(d, fs, depth=1, tag="static")
+          print("--- RESULT ---")
+          if failures:
+              print("FOUND %d problem(s):" % len(failures))
+              for f in failures:
+                  print("!!! " + f)
+          else:
+              print("OK: every imported DLL loads and every entry point resolves")
 
       - name: 运行测试
         working-directory: src-tauri
