@@ -202,7 +202,11 @@ fn build_agent_registry(
     let dsh_dirs = AgentDirs::from_root(paths::agent_root(data_dir, "deepseek-harness"), "deepseek-harness");
     let node = agents::dsh::DshRuntime::find_resource(app, "node/node.exe");
     let dsh_bin = agents::dsh::DshRuntime::find_resource(app, "dsh/node_modules/@deepseek-ai/dsh/lib/bin.js");
-    registry.register(std::sync::Arc::new(agents::dsh::DshRuntime::new(dsh_dirs, node, dsh_bin)))?;
+    registry.register(std::sync::Arc::new(agents::dsh::DshRuntime::new(
+        dsh_dirs,
+        node.clone(),
+        dsh_bin,
+    )))?;
 
     // 2) Codex：系统 codex CLI（按需拉起，CODEX_HOME 隔离）
     let codex_dirs = AgentDirs::from_root(paths::agent_root(data_dir, "codex"), "codex");
@@ -323,6 +327,12 @@ pub fn run() {
             agents::registry::session_append_message,
             agents::registry::session_rename,
             agents::registry::session_delete,
+            // 插件命令（.dph-plugin；目录按 Agent 隔离）
+            plugins::commands::plugin_list,
+            plugins::commands::plugin_dir,
+            plugins::commands::plugin_install,
+            plugins::commands::plugin_set_enabled,
+            plugins::commands::plugin_uninstall,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

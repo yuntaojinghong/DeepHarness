@@ -22,7 +22,7 @@ use crate::native::memory::MemoryStore;
 use crate::native::model::{ChatMessage, ModelProvider};
 use crate::native::planner::{Plan, PlanStep, Planner};
 use crate::native::reflector::{Reflector, StepReview};
-use crate::native::tools::{execute_tool, ToolContext};
+use crate::native::tools::{execute_tool, tool_catalog, ToolContext};
 
 /// 单步执行记录（返回给前端 / 会话存储）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -305,7 +305,7 @@ mod tests {
             review_ok,
             "任务顺利完成，文件已写入。".to_string(),
         ]));
-        let ctx = ToolContext { perms: &perms, dirs: &dirs };
+        let ctx = ToolContext { perms: &perms, dirs: &dirs, plugins: None };
         let runner = TaskRunner::new(provider, ctx, &memory);
         let outcome = runner.run("在工作区写一个清单", "").unwrap();
 
@@ -341,7 +341,7 @@ mod tests {
             review_fail,
             "部分步骤失败。".to_string(),
         ]));
-        let ctx = ToolContext { perms: &perms, dirs: &dirs };
+        let ctx = ToolContext { perms: &perms, dirs: &dirs, plugins: None };
         let runner = TaskRunner::new(provider, ctx, &memory);
         let outcome = runner.run("读不存在的文件", "").unwrap();
 
@@ -386,7 +386,7 @@ mod tests {
             review_fail,
             "最终失败。".to_string(),
         ]));
-        let ctx = ToolContext { perms: &perms, dirs: &dirs };
+        let ctx = ToolContext { perms: &perms, dirs: &dirs, plugins: None };
         let runner = TaskRunner::new(provider.clone(), ctx, &memory);
         let outcome = runner.run("读文件", "").unwrap();
         assert!(!outcome.success);
@@ -424,7 +424,7 @@ mod tests {
             review_fail,
             "最终失败。".to_string(),
         ]));
-        let ctx = ToolContext { perms: &perms, dirs: &dirs };
+        let ctx = ToolContext { perms: &perms, dirs: &dirs, plugins: None };
         let runner = TaskRunner::new(provider.clone(), ctx, &memory);
         let outcome = runner.run("读文件", "").unwrap();
         assert!(!outcome.success);
@@ -444,7 +444,7 @@ mod tests {
         .to_string();
         // 只给 plan 的回复：总结那次调用脚本耗尽 → 模型不可用 → 走兜底拼接
         let provider = Arc::new(ScriptedProvider::new(vec![plan]));
-        let ctx = ToolContext { perms: &perms, dirs: &dirs };
+        let ctx = ToolContext { perms: &perms, dirs: &dirs, plugins: None };
         let runner = TaskRunner::new(provider, ctx, &memory);
         let outcome = runner.run("纯说明任务", "").unwrap();
         assert!(outcome.success);
@@ -461,7 +461,7 @@ mod tests {
 
         let (_t, dirs, perms, memory) = setup("plugcatalog");
         let runtime = PluginRuntime::for_test(
-            PluginHost::new(PathBuf::from("node"), PathBuf::from("host.mjs")),
+            PluginHost::new(PathBuf::from("node"), PathBuf::from("host.cjs")),
             vec![PluginTool {
                 tool: ManifestTool {
                     name: "demo_echo".to_string(),

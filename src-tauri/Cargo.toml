@@ -4,7 +4,11 @@ version = "1.0.0-alpha.1"
 description = "DeepHarness — 零配置的 AI Agent 桌面工作台"
 authors = ["DeepHarness"]
 edition = "2021"
-rust-version = "1.77"
+# 实际下界由依赖决定：zip 8.x 要求 1.88（spec 见文件末尾 zip 依赖处的说明）。
+# 本 crate 自身的代码兼容更低版本，但声明一个用不了的版本没有意义——
+# 声明低了，用户在旧工具链上撞到的是 zip 内部一堆看不懂的编译错误，
+# 而不是「请升级 Rust」这一句能直接照做的话。
+rust-version = "1.88"
 
 [lib]
 name = "deepharness_lib"
@@ -38,8 +42,15 @@ features = ["bundled"]
 #   而我们只需要最常见的 deflate；
 # - deflate 走 flate2 的纯 Rust 后端（miniz_oxide），该 crate 本来就在
 #   Tauri 的依赖树里，不引入新的原生依赖。
+#
+# 为什么是 8.x 而不是更眼熟的 2.x：**整个 2.x 线（2.0.0–2.6.1）都已被
+# crates.io 撤销（yanked）**，`zip = "2.6"` 会让 cargo 在依赖解析阶段直接
+# 报 `failed to select a version for the requirement`，连编译都进不去。
+# 8.x 是当前稳定线，用到的 API（ZipArchive::new / len / by_index、
+# ZipFile::name / is_dir / size、write::ZipWriter、SimpleFileOptions）
+# 与 2.x 完全一致，升级不需要改代码。
 [dependencies.zip]
-version = "2.6"
+version = "8"
 default-features = false
 features = ["deflate"]
 

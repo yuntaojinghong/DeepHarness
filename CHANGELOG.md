@@ -44,6 +44,7 @@
   - 前端单元测试：新增 `src/lib/deepharness.test.ts`、`src/lib/storage.test.ts` 与 `src/lib/links.test.ts`（45 个用例，覆盖状态映射、错误归一化、截断与序列化辅助、会话字段兜底、模型去重、浏览器预览降级与「Web UI 必须由后端打开」的守卫、对外链接与后端白名单的跨层一致性，以及存储不可用 / 数据损坏时的降级路径）。
 
 ### Changed
+- **两个 README 按产品现状重写**：原正文整体仍在描述重构前的旧项目——鲸鱼 logo、深空科幻主题、Mica 云母材质、React 18，并把 `npm run dev`（浏览器预览）当成主要形态。现改为以「三个相互隔离的 Agent 工作台」为主线，逐条说明各 Agent 的职责与边界、权限模型、插件三重隔离、安装包 55MB 的取舍原因，并补上测试与 CI 的实际校验内容；项目结构树同步到当前真实目录。
 - **随包资源版本升级**：Node 便携版 22.12.0 → **22.22.2**，`@deepseek-ai/dsh` → **0.1.5-rc.2**。dsh 的 code-runtime 使用 `node:module` 的 `stripTypeScriptTypes()`（Node 22.13 引入），22.12.0 下整个 Harness 会在加载期报 `does not provide an export named 'stripTypeScriptTypes'`；资源准备脚本现按 major.minor 校验随包 Node，版本不足会重新下载，不再要求手工删目录。
 - **资源准备脚本改为版本驱动**：「已就绪」判断新增版本维度，已装 dsh 与目标 `DSH_VERSION` 不一致时自动重装，升级路径不再被「已就绪」永久挡住。
 - **dsh 依赖安装改用 `--legacy-peer-deps`**：dsh 有 178 个互相声明的 `@deepseek-ai/*` 包，npm 的同行依赖解析在这张图上会卡死在 `placeDep` 阶段（实测 12 分钟无任何进展）。跳过自动同行解析后完整安装只需十几秒，代价是同行依赖不自动装，因此紧接着由 `scan-peers.cjs` 扫描缺失项并显式补齐（实测：扫描 520 个包、0 缺失）。

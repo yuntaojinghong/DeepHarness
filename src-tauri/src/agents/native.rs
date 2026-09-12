@@ -263,6 +263,9 @@ impl NativeAgentRuntime {
             "model": cfg.model,
             "agentId": self.id(),
             "dataRoot": self.data_root.display().to_string(),
+            // 随包 Node 的路径：Worker 用它启动插件宿主子进程。
+            // 为 None 时 Worker 侧会降级为「没有插件工具」而不是报错。
+            "pluginNode": self.plugin_node.as_ref().map(|p| p.display().to_string()),
         });
         self.request("configure", payload)
     }
@@ -376,7 +379,8 @@ impl crate::agents::AgentRuntime for NativeAgentRuntime {
         }
     }
 
-    fn dirs(&self) -> &AgentDirs {
+    /// 该 Agent 的目录布局（插件热重载等跨模块调用需要用它定位配置）。
+    pub fn dirs(&self) -> &AgentDirs {
         &self.dirs
     }
 }

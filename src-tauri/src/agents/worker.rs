@@ -235,6 +235,10 @@ struct ConfigurePayload {
     agent_id: String,
     #[serde(rename = "dataRoot")]
     data_root: String,
+    /// 随包 Node 的可执行文件路径，插件宿主用它启动子进程。
+    /// 缺失（或为 null）时插件能力整体降级为「没有插件工具」。
+    #[serde(rename = "pluginNode", default)]
+    plugin_node: Option<String>,
 }
 
 /// 处理单个请求。
@@ -774,6 +778,9 @@ mod tests {
         // 假 node：`check_available` 只要求它是文件，不要求真能跑
         let fake_node = data_root.join("node.exe");
         std::fs::write(&fake_node, b"stub").unwrap();
+        // 先绑定成 String：`Option<&str>` 不接受 `Option<&String>`，
+        // 而 deref 强制转换不会穿透 `Option`。
+        let node_path = fake_node.display().to_string();
 
         let dirs = ensure_agent_dirs(data_root, "deepharness").unwrap();
         let plugin_dir = dirs.plugins.join("com.test.demo");
@@ -797,11 +804,7 @@ mod tests {
         )
         .unwrap();
 
-        let runtime = build_plugin_runtime(
-            data_root,
-            &dirs,
-            Some(&fake_node.display().to_string()),
-        );
+        let runtime = build_plugin_runtime(data_root, &dirs, Some(node_path.as_str()));
         assert_eq!(runtime.tools().len(), 1, "已启用插件的工具应被加载");
         assert_eq!(runtime.tools()[0].tool.name, "demo_echo");
         assert_eq!(runtime.tools()[0].plugin_id, "com.test.demo");
@@ -821,6 +824,7 @@ mod tests {
         let data_root = tmp.path();
         let fake_node = data_root.join("node.exe");
         std::fs::write(&fake_node, b"stub").unwrap();
+        let node_path = fake_node.display().to_string();
 
         let dirs = ensure_agent_dirs(data_root, "deepharness").unwrap();
         let plugin_dir = dirs.plugins.join("com.test.renamed");
@@ -837,11 +841,7 @@ mod tests {
         .unwrap();
         std::fs::write(plugin_dir.join("index.js"), "module.exports = {};").unwrap();
 
-        let runtime = build_plugin_runtime(
-            data_root,
-            &dirs,
-            Some(&fake_node.display().to_string()),
-        );
+        let runtime = build_plugin_runtime(data_root, &dirs, Some(node_path.as_str()));
         assert!(
             runtime.tools().iter().all(|t| t.tool.name != "mismatch_tool"),
             "id 与目录名不符的插件不得注册工具"

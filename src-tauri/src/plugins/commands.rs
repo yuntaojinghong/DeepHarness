@@ -16,7 +16,6 @@
 //! Worker 未运行（或未配置模型）时只落盘，下次启动自然带上。
 
 use base64::Engine as _;
-use serde::Serialize;
 
 use crate::agents::agent_config::AgentModelConfig;
 use crate::agents::registry::NativeAgentHandle;
@@ -25,15 +24,6 @@ use crate::fs_ops::BaseDir;
 use crate::paths::ensure_agent_dirs;
 use crate::plugins::store::MAX_ARCHIVE_BYTES;
 use crate::plugins::{PluginRecord, PluginStore};
-
-/// 插件工具的对外视图（命令层用，避免直接把内部结构暴露成协议）。
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginToolView {
-    pub name: String,
-    pub description: String,
-    pub args_schema: String,
-}
 
 /// 校验 agent 并解析目录布局（与 fs_ops 同款入口）。
 fn resolve_store(base: &BaseDir, agent_id: &str) -> AppResult<PluginStore> {

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::native::model::{ChatMessage, ModelProvider};
-use crate::native::tools::TOOLS;
+use crate::native::tools::{ToolDescriptor, builtin_catalog};
 
 /// 单个计划步骤。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -103,11 +103,9 @@ impl Planner {
             return Err(AppError::Other("目标不能为空".to_string()));
         }
 
-        let tools_desc = TOOLS
-            .iter()
-            .map(|t| format!("- {}: {} 参数: {}", t.name, t.description, t.args_schema))
-            .collect::<Vec<_>>()
-            .join("\n");
+        // 用冻结的工具目录渲染，插件工具与内置工具在同一张表里对模型暴露。
+        // （曾经这里直接渲染内置 `TOOLS`，插件工具就永远进不了计划。）
+        let tools_desc = self.tools_desc();
 
         let system = format!(
             "你是 DeepHarness 桌面 Agent 的规划器。把用户目标拆解为不超过 {MAX_STEPS} 个可执行步骤。\n\
@@ -131,9 +129,10 @@ impl Planner {
             ChatMessage::user(user_msg),
         ];
 
-        // 首次尝试
+        // 首次尝试。解析必须用**本规划器冻结的目录**，否则插件工具
+        // 会被当成"未知工具"整份计划作废。
         let first = self.provider.chat(&messages, 0.2)?;
-        match parse_plan(&first) {
+        match parse_plan_in(&first, &self.catalog) {
             Ok(plan) => Ok(plan),
             Err(first_err) => {
                 // 带错误反馈重试一次
@@ -144,7 +143,7 @@ impl Planner {
                     "上面的输出无法解析为计划 JSON：{first_err}\n请严格按约定格式重新只输出一个 JSON 对象。"
                 )));
                 let second = self.provider.chat(&retry_messages, 0.1)?;
-                parse_plan(&second).map_err(|e| {
+                parse_plan_in(&second, &self.catalog).map_err(|e| {
                     AppError::Other(format!("计划生成失败（重试后仍无效）: {e}"))
                 })
             }
@@ -197,7 +196,7 @@ impl Planner {
                 return None;
             }
         };
-        match parse_step_json(&raw) {
+        match parse_step_json_in(&raw, &self.catalog) {
             Ok(step) => Some(step),
             Err(e) => {
                 tracing::warn!(error = %e, "步骤修订输出无效，按原步骤重试");
@@ -274,10 +273,16 @@ fn parse_step_value(
     Ok(PlanStep { title, tool, args, expected })
 }
 
-/// 解析并校验模型输出的计划 JSON。
+/// 解析并校验模型输出的计划 JSON（只接受内置工具名）。
 ///
 /// 宽容处理常见问题：剥离 ``` 代码围栏、忽略 JSON 前后的说明文字。
+/// 需要放行插件工具时用 [`parse_plan_in`]。
 pub fn parse_plan(raw: &str) -> AppResult<Plan> {
+    parse_plan_in(raw, &builtin_catalog())
+}
+
+/// 同 [`parse_plan`]，但按给定工具目录校验工具名（内置 + 插件）。
+pub fn parse_plan_in(raw: &str, catalog: &[ToolDescriptor]) -> AppResult<Plan> {
     let json_text = extract_json(raw)?;
     let value: serde_json::Value = serde_json::from_str(&json_text)
         .map_err(|e| AppError::Other(format!("计划不是合法 JSON: {e}")))?;
