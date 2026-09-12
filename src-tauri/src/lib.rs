@@ -310,7 +310,7 @@ fn check_update() -> Option<UpdateInfo> {
             "-s",
             "--max-time",
             "8",
-            "https://api.github.com/repos/yuntaojinghong/DeepSeek-Harness-Desktop/releases/latest",
+            "https://api.github.com/repos/yuntaojinghong/DeepHarness/releases/latest",
         ])
         .output()
         .ok()?;
@@ -322,7 +322,7 @@ fn check_update() -> Option<UpdateInfo> {
     let url = json
         .get("html_url")
         .and_then(|v| v.as_str())
-        .unwrap_or("https://github.com/yuntaojinghong/DeepSeek-Harness-Desktop/releases")
+        .unwrap_or("https://github.com/yuntaojinghong/DeepHarness/releases")
         .to_string();
     Some(UpdateInfo { version, url })
 }

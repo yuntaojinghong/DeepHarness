@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg">
-  <img alt="GitHub stars" src="https://img.shields.io/github/stars/yuntaojinghong/DeepSeek-Harness-Desktop?style=social">
+  <img alt="GitHub stars" src="https://img.shields.io/github/stars/yuntaojinghong/DeepHarness?style=social">
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24c8db.svg">
   <img alt="React" src="https://img.shields.io/badge/React-18-61dafb.svg">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178c6.svg">
@@ -60,7 +60,7 @@ npm run tauri build
 
 ## 📥 Download & Install
 
-Get the latest `DeepSeek-Harness-Desktop_*.exe` from [Releases](https://github.com/yuntaojinghong/DeepSeek-Harness-Desktop/releases) and double-click to install (installs to the user directory, no admin required, creates a desktop shortcut automatically).
+Get the latest `DeepHarness_*.exe` from [Releases](https://github.com/yuntaojinghong/DeepHarness/releases) and double-click to install (installs to the user directory, no admin required, creates a desktop shortcut automatically).
 
 > Prefer portable? Place an empty `portable.flag` file next to the app directory and data will follow the app — copy the whole folder to a USB stick and use it anywhere.
 

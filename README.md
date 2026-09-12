@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue.svg">
-  <img alt="GitHub stars" src="https://img.shields.io/github/stars/yuntaojinghong/DeepSeek-Harness-Desktop?style=social">
+  <img alt="GitHub stars" src="https://img.shields.io/github/stars/yuntaojinghong/DeepHarness?style=social">
   <img alt="Tauri" src="https://img.shields.io/badge/Tauri-2-24c8db.svg">
   <img alt="React" src="https://img.shields.io/badge/React-18-61dafb.svg">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-3178c6.svg">
@@ -62,7 +62,7 @@ npm run tauri build
 
 ## 📥 下载安装
 
-前往 [Releases](https://github.com/yuntaojinghong/DeepSeek-Harness-Desktop/releases) 下载最新的 `DeepSeek-Harness-Desktop_*.exe` 安装包，双击安装即可（默认装到用户目录，无需管理员权限，自动创建桌面快捷方式）。
+前往 [Releases](https://github.com/yuntaojinghong/DeepHarness/releases) 下载最新的 `DeepHarness_*.exe` 安装包，双击安装即可（默认装到用户目录，无需管理员权限，自动创建桌面快捷方式）。
 
 > 想绿色便携使用？在安装目录旁放置一个空的 `portable.flag` 文件，数据就会跟随应用目录存储，整个文件夹拷到 U 盘即可随处使用。
 
