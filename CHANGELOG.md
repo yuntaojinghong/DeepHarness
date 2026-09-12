@@ -48,6 +48,9 @@
 - CI：测试步骤改为 `cargo test --lib` + `cargo test --test public_api`；仅编译不运行的那一步改用 `--message-format=json` 把 cargo 实际产出的测试可执行文件路径写盘，避免被 Cargo 缓存还原回来的历史产物干扰；原先的「导入表诊断」替换为**应用清单校验**（直接解析 exe 的 `RT_MANIFEST` 资源并断言含 Common-Controls v6），由 `continue-on-error` 的哨兵升级为硬性失败，故障信息也从「没有上下文的退出码」变成明确的原因。
 
 ### Fixed
+- **窗口全透明、界面像没渲染出来**：窗口原先同时启用了 `transparent: true` 与 `windowEffects.micaDark`，并靠 `html.mica body { background: transparent }` 让云母材质透出。但 **Mica 只有 Windows 11 支持**，在 Windows 10（实测 build 19045）上材质不生效，而窗口与网页背景**同时**是透明的，于是整个窗口只剩一层毛玻璃——能直接看见底下的窗口，三个 Agent 与全部界面都不可见。现已移除窗口透明与 Mica 效果，背景统一由 `body` 的 `var(--bg)` 提供，Win10 / Win11 上都表现为正常的不透明窗口。
+- **启动与使用过程中会莫名弹出命令行黑框**：所有控制台子进程（`netstat` / `taskkill`、`where`、`codex`、`curl`、`node` 启动 dsh、`cmd /C start` 打开浏览器）都未设置创建标志，从 GUI 进程拉起时各自获得一个新建的控制台并闪现在屏幕上，还会抢焦点。现新增 `process` 模块收敛这一处理（`CREATE_NO_WINDOW` + `CREATE_NEW_PROCESS_GROUP`），并让**全部**创建子进程的调用点经由 `process::command`；配套 3 个单元测试，其中一个真实执行 `cmd` 验证标志未被忽略。这类问题无法在别处统一注入——`CREATE_NO_WINDOW` 是创建标志，漏掉任何一个调用点就仍会闪窗。
+- **安装程序显示的是上一个项目的品牌**：`installer-header.bmp` / `installer-sidebar.bmp` 是旧项目（StarCore）的素材——鲸鱼图形、「DeepSeek Harness」字样、「v0.3.0」与「STARCORE」落款，与本项目毫无关系。现新增 `scripts/make-installer-art.py`，按 `Logo.tsx` 的真实品牌几何（石墨深空底 + 挽具环 + 核心 + 三节点）重绘两张素材；**刻意不再在图内写版本号**，旧素材的「v0.3.0」正是硬编码版本留下的债，不重复这个错误。
 - **官方 Web UI 在新版 dsh 上必然 401**：dsh 0.1.5 起 Web UI 需要每次启动重新生成的 token，原先固定打开基础地址只能得到 401 页面。现由后端解析带 token 的地址并打开（见 Added 第一条）。
 - **资源准备脚本的「Node 版本不足时替换失败」**：旧实现把解压结果 `mv` 到一个可能已存在的 `resources/node` 下，结果是 `resources/node/node-v22.22.2-win-x64/` —— 看着像成功，但 bin 位置全错、版本依旧过旧。现改为先校验新 Node 可执行、再把旧目录改名暂存并替换，失败回滚，保证不会只剩一个不可用的目录。
 - **资源准备脚本的「完好依赖树被判定为残缺」**：就绪判断原先递归 `find` 所有子目录，把包内部的 `dist/`、`lib/` 这类正常子目录当成「缺少 `package.json` 的残包」，于是每次都触发整棵重装（非幂等、每次白等 40 秒）。现只匹配真正的包目录形态（`node_modules/<name>` 与 `node_modules/@scope/<name>`）。

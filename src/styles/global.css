@@ -81,10 +81,12 @@ body {
   transition: background 0.3s ease, color 0.3s ease;
 }
 
-/* Tauri 窗口启用 Mica 云母材质时，网页背景透明让系统材质透出 */
-html.mica body {
-  background: transparent;
-}
+/* 说明：曾有一条 `html.mica body { background: transparent }` 配合窗口的
+   `transparent: true` + `windowEffects.micaDark`，意图是让云母材质透出。
+   但 Mica 只有 Windows 11 支持，在 Windows 10 上材质不生效，窗口就变成
+   **完全透明**——能直接看见底下的窗口、界面像没渲染出来。
+   现已移除窗口透明与 Mica 效果，背景由 body 的 `var(--bg)` 提供，
+   在 Win10 / Win11 上都表现为正常的不透明窗口。 */
 
 ::-webkit-scrollbar {
   width: 8px;

@@ -19,12 +19,7 @@
         "minWidth": 940,
         "minHeight": 620,
         "center": true,
-        "decorations": true,
-        "transparent": true,
-        "windowEffects": {
-          "effects": ["micaDark"],
-          "state": "active"
-        }
+        "decorations": true
       }
     ],
     "security": {

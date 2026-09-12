@@ -10,7 +10,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -82,7 +82,9 @@ impl NativeAgentRuntime {
     }
 
     fn spawn_worker(&self) -> AppResult<()> {
-        let mut child = Command::new(&self.worker_exe)
+        // 自我重执行：主程序本身是 GUI 子系统，但同一条命令行若被当作
+        // 控制台程序拉起仍可能带出窗口，这里统一静默启动。
+        let mut child = crate::process::command(&self.worker_exe)
             .arg("--agent-worker")
             .arg(self.id())
             .stdin(Stdio::piped())

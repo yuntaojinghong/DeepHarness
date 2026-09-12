@@ -11,7 +11,7 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::Mutex;
 
 // lib 构建下本 trait 仅测试用到（测试通过 trait 方法读取 status），故显式放行
@@ -75,13 +75,17 @@ impl DshRuntime {
     }
 
     fn kill_stale_port_holder() {
-        if let Ok(out) = Command::new("netstat").args(["-ano"]).output() {
+        // netstat / taskkill 都是控制台程序，必须静默启动，否则每次
+        // 启动 Harness 都会闪过两个黑框。
+        if let Ok(out) = crate::process::command("netstat").args(["-ano"]).output() {
             let s = String::from_utf8_lossy(&out.stdout);
             let needle = format!(":{DSH_PORT}");
             for line in s.lines() {
                 if line.contains(&needle) && line.to_ascii_uppercase().contains("LISTENING") {
                     if let Some(pid) = line.split_whitespace().last() {
-                        let _ = Command::new("taskkill").args(["/F", "/PID", pid]).output();
+                        let _ = crate::process::command("taskkill")
+                            .args(["/F", "/PID", pid])
+                            .output();
                     }
                 }
             }
@@ -182,7 +186,7 @@ impl crate::agents::AgentRuntime for DshRuntime {
         let data_dir =
             canonicalize_lenient(&self.dirs.root).unwrap_or_else(|| self.dirs.root.clone());
 
-        let mut child = Command::new(&self.node_path)
+        let mut child = crate::process::command(&self.node_path)
             .env("DSH_HOME", &data_dir)
             .arg(&self.dsh_bin_path)
             .arg("web")

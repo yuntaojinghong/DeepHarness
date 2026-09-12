@@ -18,10 +18,10 @@ pub mod native;
 mod open_url;
 pub mod paths;
 pub mod permissions;
+mod process;
 mod sessions;
 
 use std::path::PathBuf;
-use std::process::Command;
 
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
@@ -56,7 +56,7 @@ struct EnvStatus {
 }
 
 fn detect(cmd: &str, version_args: &[&str]) -> RuntimeInfo {
-    let path = Command::new("where")
+    let path = crate::process::command("where")
         .arg(cmd)
         .output()
         .ok()
@@ -68,7 +68,7 @@ fn detect(cmd: &str, version_args: &[&str]) -> RuntimeInfo {
                 .map(|s| s.trim().to_string())
         });
 
-    let version = Command::new(cmd)
+    let version = crate::process::command(cmd)
         .args(version_args)
         .output()
         .ok()
@@ -159,7 +159,7 @@ struct UpdateInfo {
 
 #[tauri::command]
 fn check_update() -> Option<UpdateInfo> {
-    let output = Command::new("curl")
+    let output = crate::process::command("curl")
         .args([
             "--ssl-no-revoke",
             "-s",

@@ -14,7 +14,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -68,7 +68,8 @@ impl CodexRuntime {
 
     /// 探测系统中的 codex CLI（`where codex` + `codex --version`）。
     fn probe_cli(&self) -> AppResult<String> {
-        let located = Command::new("where")
+        // codex 是 Node CLI（console 子系统），静默启动以免闪出黑框。
+        let located = crate::process::command("where")
             .arg("codex")
             .output()
             .map_err(|e| AppError::Other(format!("探测 codex 失败: {e}")))?;
@@ -78,7 +79,7 @@ impl CodexRuntime {
                     .to_string(),
             ));
         }
-        let version_out = Command::new("codex")
+        let version_out = crate::process::command("codex")
             .arg("--version")
             .output()
             .map_err(|e| AppError::Other(format!("运行 codex --version 失败: {e}")))?;
@@ -124,7 +125,7 @@ impl CodexRuntime {
             .open(self.log_path())
             .map_err(|e| AppError::Io(e))?;
 
-        let mut child = Command::new("codex")
+        let mut child = crate::process::command("codex")
             .env("CODEX_HOME", &self.dirs.config)
             .arg("exec")
             .arg(prompt)

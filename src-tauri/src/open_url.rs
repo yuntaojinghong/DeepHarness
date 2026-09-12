@@ -90,7 +90,7 @@ pub fn open_in_system_browser(url: &str) -> AppResult<()> {
     }
 
     #[cfg(windows)]
-    let spawned = std::process::Command::new("cmd")
+    let spawned = crate::process::command("cmd")
         // 空字符串是 `start` 的窗口标题占位，不可省略，
         // 否则带引号的 URL 会被当作标题而根本不打开。
         .args(["/C", "start", "", url])
