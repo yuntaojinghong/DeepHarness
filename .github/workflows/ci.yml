@@ -83,6 +83,18 @@ jobs:
         working-directory: src-tauri
         run: cargo check --all-targets
 
+      - name: 就位测试所需的原生 DLL
+        shell: pwsh
+        working-directory: src-tauri
+        run: |
+          # 测试二进制位于 target/debug/deps/，而 WebView2Loader.dll 由
+          # webview2-com-sys 的 build script 产出到 OUT_DIR，必须复制到
+          # 测试 exe 旁边，否则加载阶段直接 STATUS_ENTRYPOINT_NOT_FOUND。
+          New-Item -ItemType Directory -Force -Path target/debug/deps | Out-Null
+          Get-ChildItem -Path target/debug/build -Recurse -Filter "WebView2Loader.dll" |
+            ForEach-Object { Copy-Item $_.FullName -Destination target/debug/deps -Force }
+          Get-ChildItem target/debug/deps -Filter "WebView2Loader.dll" | ForEach-Object { $_.FullName }
+
       - name: 运行测试
         working-directory: src-tauri
         run: cargo test
