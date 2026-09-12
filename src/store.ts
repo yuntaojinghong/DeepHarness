@@ -24,8 +24,10 @@ import { fetchOfficialModels } from "./lib/models";
 import { AGENT_IDS, type AgentId } from "./lib/env";
 import {
   agentList,
+  deepharnessStatus,
   type AgentOverview,
   type AgentStatusView,
+  type WorkerReadiness,
 } from "./lib/deepharness";
 
 /** 某个 Agent 名下的会话（按更新时间倒序无关，保持既有顺序）。 */
@@ -50,6 +52,13 @@ interface AppState {
   agents: AgentOverview[];
   agentsRefreshing: boolean;
   agentsError: string | null;
+  /**
+   * DeepHarness Worker 的就绪状态（唯一来源）。
+   *
+   * 任务控制台与右侧面板都从这里读，而不是各自轮询——否则同一个
+   * `deepharness_status` 会被并发调用两次，且两处状态可能短暂不一致。
+   */
+  workerReadiness: WorkerReadiness | null;
   settings: AppSettings;
   models: ModelConfig[];
   officialModels: ModelConfig[];
@@ -72,6 +81,7 @@ interface AppState {
   agentOverview: (agent: AgentId) => AgentOverview | null;
   agentStatus: (agent: AgentId) => AgentStatusView | undefined;
   refreshAgents: () => Promise<void>;
+  refreshWorkerReadiness: () => Promise<WorkerReadiness>;
   newConversation: (modelId?: string) => string;
   renameConversation: (id: string, title: string) => void;
   deleteConversation: (id: string) => void;
@@ -107,6 +117,7 @@ export const useAppStore = create<AppState>((set, get) => {
   agents: [],
   agentsRefreshing: false,
   agentsError: null,
+  workerReadiness: null,
   settings: loadSettings(),
   models: loadModels(),
   officialModels: loadOfficialModels(),
@@ -199,6 +210,21 @@ export const useAppStore = create<AppState>((set, get) => {
       set({ agentsError: e instanceof Error ? e.message : String(e) });
     } finally {
       set({ agentsRefreshing: false });
+    }
+  },
+
+  refreshWorkerReadiness: async () => {
+    try {
+      const readiness = await deepharnessStatus();
+      set({ workerReadiness: readiness });
+      return readiness;
+    } catch (e) {
+      // 读取失败不能当成 Worker 正常：按「未运行且未配置」保守处理，
+      // 并让调用方拿到同一个值，避免界面出现两套结论。
+      console.warn("[deepharness] 读取 Worker 状态失败", e);
+      const fallback: WorkerReadiness = { running: false, configured: false };
+      set({ workerReadiness: fallback });
+      return fallback;
     }
   },
 

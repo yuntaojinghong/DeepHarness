@@ -24,9 +24,10 @@
   - 会话按 Agent 隔离：`Conversation` 新增 `agent` 字段（历史数据读取时统一兜底），切换 Agent 时会话列表、主视图与右侧面板整体切换，不跨 Agent 泄漏内容。
   - DeepHarness 任务控制台：目标输入 → 「生成计划」预览结构化步骤 → 「执行任务」展示逐步执行时间线（工具、结果、反思建议、重试与步骤修订标注）→ 任务总结；未启动 Worker 或未配置模型时给出明确引导而非静默失败。
   - DeepHarness 右侧面板：Worker 就绪状态（进程号、协议版本、崩溃原因）与启停、模型配置表单（落盘 + 热注入，API Key 只回显尾号，支持一键沿用对话侧已填密钥）、长期记忆库（统计 / 关键词检索 / 手动写入 / 单条删除）。
-  - 前端单元测试：新增 `src/lib/deepharness.test.ts` 与 `src/lib/storage.test.ts`（29 个用例，覆盖状态映射、错误归一化、截断与序列化辅助、会话字段兜底、模型去重、浏览器预览降级）。
+  - 前端单元测试：新增 `src/lib/deepharness.test.ts` 与 `src/lib/storage.test.ts`（35 个用例，覆盖状态映射、错误归一化、截断与序列化辅助、会话字段兜底、模型去重、浏览器预览降级，以及存储不可用 / 数据损坏时的降级路径）。
 
 ### Changed
+- **DeepHarness Worker 就绪状态改为单一来源**：`workerReadiness` 与 `refreshWorkerReadiness` 提升到全局 store，由 `App` 统一轮询，任务控制台与右侧面板只读结果。此前两处各自 `setInterval` 轮询同一个 `deepharness_status`，既重复发 IPC，又可能短暂呈现互相矛盾的结论。
 - **启动流程不再跳转官方 Web UI**：移除启动时 `window.location.href = "http://127.0.0.1:3080"` 与已不存在的 `start_dsh` 命令调用（该命令早已在重构中删除，此前会使每次启动都落到「启动失败」分支）。现在启动只做本机环境检测与 Agent 概览读取，失败也不阻塞进入界面，保证零配置用户直接可用。
 - **前端 CI 增加单元测试步骤**（`npm test`），与类型检查、构建并列。
 - Windows 构建链补齐：MSYS2 侧补装 mingw-w64 头文件与 winpthreads（rusqlite bundled 编译 SQLite 所需）；Rust 链接统一启用 `link-self-contained`。
@@ -34,6 +35,7 @@
 - CI：测试步骤改为 `cargo test --lib` + `cargo test --test public_api`；仅编译不运行的那一步改用 `--message-format=json` 把 cargo 实际产出的测试可执行文件路径写盘，避免被 Cargo 缓存还原回来的历史产物干扰；原先的「导入表诊断」替换为**应用清单校验**（直接解析 exe 的 `RT_MANIFEST` 资源并断言含 Common-Controls v6），由 `continue-on-error` 的哨兵升级为硬性失败，故障信息也从「没有上下文的退出码」变成明确的原因。
 
 ### Fixed
+- **本机存储不可用时界面无法启动**：`storage.ts` 原先直接访问 `localStorage`，WebView 在隐私模式 / 存储被禁用时访问会**抛异常**（而非返回 `null`），异常会一路冒到 store 的初始化解，导致整个界面白屏。现统一经 `readRaw` / `writeRaw` / `readJson` 容错助手访问，读失败当无数据、写失败静默跳过，并补了对应的降级测试。
 - **非空目录递归删除在工作区内被误拒**：`native/tools.rs` 与 `fs_ops.rs` 都用未规范化的 `dirs.workspace` 去 `Path::strip_prefix` 一个已规范化的绝对路径，Windows 上因 `\\?\` 前缀 / 短名 / 大小写差异必然失配，导致工作区内的非空目录也无法递归删除。现统一改用新增的 `permissions::is_within`（两侧先规范化 + 大小写不敏感的前缀+分隔符匹配），并补了回归测试。
 - **Worker 未配置时的报错不指向根因**：`plan` / `run_task` / `remember` / `recall` / `forget` 都先校验请求载荷、后检查配置，未配置时返回的是「缺少 goal」这类字段错误。现改为配置类前置条件优先，报错明确提示先 `configure`。
 - **`agent_config` 单测相互踩踏**：测试目录按进程 id 复用，并行执行时写损坏 JSON 的用例会让读回用例拿到 `None` 而随机失败。改为每个用例独立临时目录。

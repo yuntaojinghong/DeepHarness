@@ -9,14 +9,12 @@ import {
   deepharnessMemoryStats,
   deepharnessRecall,
   deepharnessRemember,
-  deepharnessStatus,
   describeError,
   memoryKindLabel,
   MEMORY_KINDS,
   type Memory,
   type MemoryKind,
   type MemoryStats,
-  type WorkerReadiness,
 } from "../lib/deepharness";
 import { PlusIcon, SearchIcon, TrashIcon } from "./Icons";
 
@@ -29,30 +27,16 @@ import { PlusIcon, SearchIcon, TrashIcon } from "./Icons";
 export default function DeepHarnessPanel() {
   const status = useAppStore((s) => s.agentStatus("deepharness"));
   const refreshAgents = useAppStore((s) => s.refreshAgents);
+  const readiness = useAppStore((s) => s.workerReadiness);
+  const refreshWorkerReadiness = useAppStore((s) => s.refreshWorkerReadiness);
   const settings = useAppStore((s) => s.settings);
   const models = useAppStore((s) => s.models);
 
-  const [readiness, setReadiness] = useState<WorkerReadiness | null>(null);
   const [busy, setBusy] = useState<null | "start" | "stop">(null);
   const [panelError, setPanelError] = useState<string | null>(null);
 
   const running = status?.state === "running";
   const selectedModel = models.find((m) => m.id === settings.defaultModelId) ?? models[0];
-
-  const refreshReadiness = useCallback(async () => {
-    try {
-      setReadiness(await deepharnessStatus());
-    } catch (e) {
-      console.warn("[deepharness] 读取 Worker 状态失败", e);
-      setReadiness({ running: false, configured: false });
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshReadiness();
-    const t = setInterval(() => void refreshReadiness(), 5000);
-    return () => clearInterval(t);
-  }, [refreshReadiness]);
 
   const toggleWorker = async () => {
     setPanelError(null);
@@ -61,7 +45,7 @@ export default function DeepHarnessPanel() {
       if (running) await agentStop("deepharness");
       else await agentStart("deepharness");
       await refreshAgents();
-      await refreshReadiness();
+      await refreshWorkerReadiness();
     } catch (e) {
       console.error("[deepharness] 切换 Worker 状态失败", e);
       setPanelError(describeError(e));
@@ -108,7 +92,7 @@ export default function DeepHarnessPanel() {
             {busy ? <span className="spinner" /> : null}
             {running ? "停止" : "启动"}
           </button>
-          <button className="btn btn-sm" onClick={() => void refreshReadiness()} disabled={busy !== null}>
+          <button className="btn btn-sm" onClick={() => void refreshWorkerReadiness()} disabled={busy !== null}>
             刷新
           </button>
         </div>
@@ -123,7 +107,7 @@ export default function DeepHarnessPanel() {
         defaultBaseUrl={selectedModel?.baseUrl ?? "https://api.deepseek.com/v1"}
         defaultModel={selectedModel?.model ?? "deepseek-chat"}
         fallbackApiKey={settings.apiKeys["deepseek"] ?? ""}
-        onSaved={() => void refreshReadiness()}
+        onSaved={() => void refreshWorkerReadiness()}
       />
 
       <MemorySection running={running} configured={readiness?.configured === true} />

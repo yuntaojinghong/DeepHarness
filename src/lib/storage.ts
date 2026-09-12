@@ -16,6 +16,39 @@ export function uid(): string {
 export const DEFAULT_AGENT_ID = "deepseek-harness";
 
 /**
+ * localStorage 的容错读写。
+ *
+ * WebView 在隐私模式 / 存储被禁用时，访问 `localStorage` 会直接抛异常，
+ * 而不是返回 null。持久化只是「锦上添花」，任何一步失败都不应该让整个
+ * 界面起不来，因此这里统一吞掉异常：读失败当作没有数据，写失败静默跳过。
+ */
+function readRaw(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeRaw(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* 存储不可用：本次不持久化 */
+  }
+}
+
+function readJson<T>(key: string, fallback: T): T {
+  const raw = readRaw(key);
+  if (raw === null) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * 补全历史会话缺失的字段。
  *
  * 旧版本的会话没有 `agent` 字段，直接读取会得到 `undefined`，
@@ -37,16 +70,12 @@ export function normalizeConversation(raw: Partial<Conversation>): Conversation 
 }
 
 export function loadConversations(): Conversation[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(K_CONVERSATIONS) || "[]") as Partial<Conversation>[];
-    return raw.map(normalizeConversation);
-  } catch {
-    return [];
-  }
+  const raw = readJson<Partial<Conversation>[]>(K_CONVERSATIONS, []);
+  return Array.isArray(raw) ? raw.map(normalizeConversation) : [];
 }
 
 export function saveConversations(list: Conversation[]) {
-  localStorage.setItem(K_CONVERSATIONS, JSON.stringify(list));
+  writeRaw(K_CONVERSATIONS, JSON.stringify(list));
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -59,15 +88,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
 };
 
 export function loadSettings(): AppSettings {
-  try {
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(K_SETTINGS) || "{}") };
-  } catch {
-    return { ...DEFAULT_SETTINGS };
-  }
+  return { ...DEFAULT_SETTINGS, ...readJson<Partial<AppSettings>>(K_SETTINGS, {}) };
 }
 
 export function saveSettings(s: AppSettings) {
-  localStorage.setItem(K_SETTINGS, JSON.stringify(s));
+  writeRaw(K_SETTINGS, JSON.stringify(s));
 }
 
 export const BUILTIN_MODELS: ModelConfig[] = [
@@ -107,27 +132,21 @@ export function dedupeModels(...groups: ModelConfig[][]): ModelConfig[] {
 }
 
 export function loadCustomModels(): ModelConfig[] {
-  try {
-    return JSON.parse(localStorage.getItem(K_MODELS) || "[]") as ModelConfig[];
-  } catch {
-    return [];
-  }
+  const raw = readJson<ModelConfig[]>(K_MODELS, []);
+  return Array.isArray(raw) ? raw : [];
 }
 
 export function saveCustomModels(list: ModelConfig[]) {
-  localStorage.setItem(K_MODELS, JSON.stringify(list));
+  writeRaw(K_MODELS, JSON.stringify(list));
 }
 
 export function loadOfficialModels(): ModelConfig[] {
-  try {
-    return JSON.parse(localStorage.getItem(K_OFFICIAL_MODELS) || "[]") as ModelConfig[];
-  } catch {
-    return [];
-  }
+  const raw = readJson<ModelConfig[]>(K_OFFICIAL_MODELS, []);
+  return Array.isArray(raw) ? raw : [];
 }
 
 export function saveOfficialModels(list: ModelConfig[]) {
-  localStorage.setItem(K_OFFICIAL_MODELS, JSON.stringify(list));
+  writeRaw(K_OFFICIAL_MODELS, JSON.stringify(list));
 }
 
 export function loadModels(): ModelConfig[] {
@@ -135,35 +154,26 @@ export function loadModels(): ModelConfig[] {
 }
 
 export function saveModels(list: ModelConfig[]) {
-  const custom = list.filter((m) => !m.builtin);
-  localStorage.setItem(K_MODELS, JSON.stringify(custom));
+  writeRaw(K_MODELS, JSON.stringify(list.filter((m) => !m.builtin)));
 }
 
 export function loadSelected(): string {
-  return localStorage.getItem(K_SELECTED) || "deepseek-v4-flash";
+  return readRaw(K_SELECTED) || DEFAULT_SETTINGS.defaultModelId;
 }
 
 export function saveSelected(id: string) {
-  localStorage.setItem(K_SELECTED, id);
+  writeRaw(K_SELECTED, id);
 }
 
 /** 读取当前激活的 Agent；非法或缺失时回退到默认 Agent。 */
 export function loadActiveAgent(): AgentId {
-  try {
-    const raw = localStorage.getItem(K_ACTIVE_AGENT);
-    if (raw && (AGENT_IDS as readonly string[]).includes(raw)) return raw as AgentId;
-  } catch {
-    /* localStorage 不可用时按默认处理 */
-  }
+  const raw = readRaw(K_ACTIVE_AGENT);
+  if (raw && (AGENT_IDS as readonly string[]).includes(raw)) return raw as AgentId;
   return DEFAULT_AGENT_ID as AgentId;
 }
 
 export function saveActiveAgent(id: string) {
-  try {
-    localStorage.setItem(K_ACTIVE_AGENT, id);
-  } catch {
-    /* ignore */
-  }
+  writeRaw(K_ACTIVE_AGENT, id);
 }
 
 export function exportConversationJson(conv: Conversation) {

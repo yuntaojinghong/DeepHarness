@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../store";
 import {
   agentStart,
   deepharnessPlan,
   deepharnessRunTask,
-  deepharnessStatus,
   describeError,
   formatArgs,
   truncateResult,
@@ -28,7 +27,9 @@ import LogoMark from "./Logo";
 export default function DeepHarnessView() {
   const activeAgent = useAppStore((s) => s.activeAgent);
   const agentStatus = useAppStore((s) => s.agentStatus("deepharness"));
+  const readiness = useAppStore((s) => s.workerReadiness);
   const refreshAgents = useAppStore((s) => s.refreshAgents);
+  const refreshWorkerReadiness = useAppStore((s) => s.refreshWorkerReadiness);
   const setContextOpen = useAppStore((s) => s.setContextOpen);
 
   const [goal, setGoal] = useState("");
@@ -37,7 +38,6 @@ export default function DeepHarnessView() {
   const [outcome, setOutcome] = useState<TaskOutcome | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [readiness, setReadiness] = useState<WorkerReadiness | null>(null);
   const [starting, setStarting] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -45,31 +45,11 @@ export default function DeepHarnessView() {
   const running = agentStatus?.state === "running";
   const configured = readiness?.configured === true;
 
-  /** 取一次 Worker 就绪状态，并把结果写入 state；返回值供调用方直接判断。 */
-  const fetchReadiness = useCallback(async (): Promise<WorkerReadiness> => {
-    try {
-      const wr = await deepharnessStatus();
-      setReadiness(wr);
-      return wr;
-    } catch (e) {
-      console.warn("[deepharness] 读取 Worker 状态失败", e);
-      const fallback: WorkerReadiness = { running: false, configured: false };
-      setReadiness(fallback);
-      return fallback;
-    }
-  }, []);
-
-  useEffect(() => {
-    void fetchReadiness();
-    const t = setInterval(() => void fetchReadiness(), 5000);
-    return () => clearInterval(t);
-  }, [fetchReadiness]);
-
-  // Agent 被切换下去时不再保留上一次的结果，避免误读成当前任务。
+  // 切换到本 Agent 时立刻取一次状态，不必等 App 的 5 秒轮询周期。
   useEffect(() => {
     if (activeAgent !== "deepharness") return;
-    void fetchReadiness();
-  }, [activeAgent, fetchReadiness]);
+    void refreshWorkerReadiness();
+  }, [activeAgent, refreshWorkerReadiness]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -83,13 +63,13 @@ export default function DeepHarnessView() {
    * 直接用它判断会误报「未配置模型」。
    */
   const ensureWorker = async (): Promise<WorkerReadiness | null> => {
-    if (running) return fetchReadiness();
+    if (running) return refreshWorkerReadiness();
     setStarting(true);
     setNotice("正在启动 DeepHarness Worker…");
     try {
       await agentStart("deepharness");
       await refreshAgents();
-      const wr = await fetchReadiness();
+      const wr = await refreshWorkerReadiness();
       setNotice("Worker 已启动");
       return wr;
     } catch (e) {

@@ -61,12 +61,18 @@ export default function App() {
   }, [hasKey]);
 
   // 运行中的 Agent 会因崩溃 / 退出而变更状态，按固定间隔轻量轮询概览。
-  // 未运行时开销仅一次 IPC，不影响界面响应。
+  // 未运行时开销仅一次 IPC，不影响界面响应。DeepHarness 激活时额外刷新
+  // Worker 就绪状态——统一在这里轮询，任务控制台与右侧面板只读结果，
+  // 避免同一个命令被并发调用多次。
   useEffect(() => {
     if (!isTauri()) return;
-    const t = setInterval(() => {
+    const tick = () => {
       void refreshAgents();
-    }, 5000);
+      const { activeAgent: current, refreshWorkerReadiness } = useAppStore.getState();
+      if (current === "deepharness") void refreshWorkerReadiness();
+    };
+    tick();
+    const t = setInterval(tick, 5000);
     return () => clearInterval(t);
   }, [refreshAgents]);
 
