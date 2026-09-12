@@ -8,7 +8,12 @@ vite.config.ts.timestamp-*.mjs
 ghcli/
 gh.zip
 node-win.zip
-resources/
+# 随包资源由 scripts/setup-resources.sh 生成（Node 便携版 + dsh，上百 MB）。
+# 只留一个 README 占位：bundle.resources 的 glob 在 tauri-build 阶段
+# （即编译期）就会校验，目录完全不存在会让 cargo check / cargo test
+# 直接失败，任何人 clone 后都编不过。
+resources/*
+!resources/README.md
 starcore-target/
 dsh-pkg.zip
 .npm-cache/
