@@ -172,9 +172,11 @@ pub fn execute_tool(
                 if empty {
                     std::fs::remove_dir(&canonical)?;
                 } else {
-                    // 非空目录：仅 workspace 内允许递归删除（与 fs_ops 一致）
-                    let in_workspace = canonical.strip_prefix(&ctx.dirs.workspace).is_ok();
-                    if !in_workspace {
+                    // 非空目录：仅 workspace 内允许递归删除（与 fs_ops 一致）。
+                    // 判定必须经 permissions::is_within：此处比较的是规范化后的
+                    // 绝对路径与（通常未规范化的）workspace，直接前缀比较会把
+                    // 工作区内的目录误判成"工作区之外"。
+                    if !crate::permissions::is_within(&ctx.dirs.workspace, &canonical) {
                         return Err(AppError::Other(
                             "workspace 之外的非空目录不允许递归删除".to_string(),
                         ));

@@ -243,6 +243,23 @@ pub fn canonicalize_lenient(path: &Path) -> Option<PathBuf> {
     None
 }
 
+/// 判断 `path` 是否位于 `base` 之内（含与 `base` 相等）。
+///
+/// 两侧都先规范化再比较：调用方手里的 `base`（例如 `dirs.workspace`）通常
+/// 未经 canonicalize，若直接 `Path::strip_prefix` 会因 `\\?\` 前缀、短名或
+/// 大小写差异误判成"不在内部"。"非空目录仅限工作区内递归删除"这类判定
+/// 必须走本函数，否则工作区内的删除会被错误拒绝。
+/// 比较复用 `path_key`，在 Windows 语义下大小写不敏感。
+pub fn is_within(base: &Path, path: &Path) -> bool {
+    let Some(candidate) = canonicalize_lenient(path) else {
+        return false;
+    };
+    let root = canonicalize_lenient(base)
+        .map(|p| path_key(&p))
+        .unwrap_or_else(|| path_key(base));
+    path_within(&path_key(&candidate), &root)
+}
+
 /// 生成用于比较的路径键：小写化（Windows 大小写不敏感）、统一分隔符。
 fn path_key(path: &Path) -> String {
     path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
@@ -386,5 +403,30 @@ mod tests {
         let resolved = canonicalize_lenient(&missing).unwrap();
         assert!(resolved.ends_with("new_sub_dir\\new_file.txt") || resolved.ends_with("new_sub_dir/new_file.txt"));
         assert!(resolved.starts_with(canonicalize(tmp.path()).unwrap()));
+    }
+
+    #[test]
+    fn is_within_accepts_workspace_children_and_rejects_siblings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = make_dirs(tmp.path(), "deepharness");
+        let inside = dirs.workspace.join("proj");
+        std::fs::create_dir_all(inside.join("deep")).unwrap();
+
+        // 关键回归场景：传入的 child 是 canonicalize 之后的路径，而 base
+        // （dirs.workspace）未经规范化——旧的 strip_prefix 写法在这里会误判。
+        let canonical_child = canonicalize(&inside).unwrap();
+        assert!(is_within(&dirs.workspace, &canonical_child));
+        assert!(is_within(&dirs.workspace, &inside));
+        assert!(is_within(&dirs.workspace, &dirs.workspace), "自身视为在内部");
+
+        // 兄弟目录 / 前缀相似的目录不得通过
+        let sibling = tmp.path().join("workspace-evil");
+        std::fs::create_dir_all(&sibling).unwrap();
+        assert!(!is_within(&dirs.workspace, &sibling));
+        assert!(!is_within(&dirs.workspace, &tmp.path()));
+
+        // canonicalize_lenient 容忍尚不存在的路径（写新文件场景），因此工作区
+        // 内尚未创建的新路径同样判定为“在内部”。
+        assert!(is_within(&dirs.workspace, &dirs.workspace.join("nope/deeper")));
     }
 }

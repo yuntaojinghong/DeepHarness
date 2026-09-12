@@ -271,11 +271,10 @@ pub fn delete_path(
         if empty {
             std::fs::remove_dir(&canonical)?;
         } else {
-            // 非空目录：仅 workspace 内允许递归删除
-            let in_workspace = canonical
-                .strip_prefix(&dirs.workspace)
-                .is_ok();
-            if !in_workspace {
+            // 非空目录：仅 workspace 内允许递归删除。路径包含判定统一走
+            // permissions::is_within（两侧先规范化，避免 \\?\ 前缀、
+            // 短名与大小写差异导致的误判）。
+            if !crate::permissions::is_within(&dirs.workspace, &canonical) {
                 return Err(AppError::Other(
                     "拒绝删除：目录非空，且不在该 Agent 的工作区内（只允许删除文件或空目录）"
                         .to_string(),
