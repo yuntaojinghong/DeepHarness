@@ -19,6 +19,9 @@ dsh-pkg.zip
 *.log
 .DS_Store
 
+# UI 端到端验证（scripts/verify-ui.mjs）的产物：截图、报告、临时浏览器配置
+.verify-ui/
+
 # 构建产物若被手动拷到根目录，不要误提交
 *-setup.exe
 *-setup.zip

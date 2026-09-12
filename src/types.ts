@@ -75,8 +75,17 @@ export interface Persona {
   prompt: string;
 }
 
+/**
+ * 对话路径的工具开关。
+ *
+ * 只保留**真实存在**的能力开关：内置工具集目前就是 list_dir / read_file / write_file
+ * 三个文件类工具（见 `lib/agent-tools.ts`），因此这里只有一个字段。
+ * 曾经多出的 `code`（代码执行）与 `search`（网页搜索）没有对应工具，
+ * 拨动它们只会连带影响同一个布尔值，属于误导性界面，已移除。
+ *
+ * 不提供命令执行与网络访问是**刻意的安全边界**，不是待办事项。
+ */
 export interface ToolToggle {
-  code: boolean;
-  file: boolean;
-  search: boolean;
+  /** 文件工具（list_dir / read_file / write_file），逐次经权限白名单校验。 */
+  fileTools: boolean;
 }

@@ -3,6 +3,7 @@ import { useAppStore } from "../store";
 import { useActiveConversation } from "../lib/hooks";
 import type { ChatMessage, ToolCallRecord } from "../types";
 import { streamChat, type ToolCallChunk } from "../lib/llm";
+import { AGENT_TOOLS } from "../lib/agent-tools";
 import { listDir, readTextFile, writeTextFile, type AgentId } from "../lib/env";
 import { AGENT_META } from "../lib/deepharness";
 import { uid, exportConversationJson, exportConversationMarkdown, PERSONAS, notify } from "../lib/storage";
@@ -12,59 +13,6 @@ import DeepHarnessView from "./DeepHarnessView";
 import LogoMark from "./Logo";
 import PersonaMenu from "./PersonaMenu";
 import { SparkIcon } from "./Icons";
-
-/**
- * 当前 Agent 的工具集。注意：出于安全设计，这里不再提供任何命令执行能力；
- * 文件操作全部经由 Rust 权限层（每 Agent 独立白名单）完成。
- */
-const AGENT_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "list_dir",
-      description:
-        "列出指定目录下的文件与子目录。仅允许访问该 Agent 的工作区或用户已授权的目录；未授权时返回提示，需请用户在授权弹窗中放行。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "目录路径" },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read_file",
-      description:
-        "读取文本文件内容（UTF-8）。仅允许读取该 Agent 的工作区或用户已授权的路径；未授权时返回提示，需请用户放行。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "文件路径" },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "write_file",
-      description:
-        "写入文本文件（UTF-8，覆盖写，父目录不存在时自动创建）。仅允许写入该 Agent 的工作区或用户已授权的路径；未授权时返回提示，需请用户放行。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "文件路径" },
-          content: { type: "string", description: "要写入的完整文本内容" },
-        },
-        required: ["path", "content"],
-      },
-    },
-  },
-];
 
 const SUGGESTIONS = [
   "帮我整理这个文件夹里的文件，按类型分类",
@@ -141,7 +89,7 @@ export default function ChatArea() {
       .forEach((m) => apiMessages.push({ role: m.role, content: m.content }));
     apiMessages.push({ role: "user", content: text });
 
-    const withTools = model.supportsTools && (tools.code || tools.file || tools.search);
+    const withTools = model.supportsTools && tools.fileTools;
 
     try {
       for (let round = 0; round < 6; round++) {

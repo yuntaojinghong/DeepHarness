@@ -2,6 +2,7 @@ import { useAppStore } from "../store";
 import { useActiveConversation } from "../lib/hooks";
 import { AGENT_META } from "../lib/deepharness";
 import DeepHarnessPanel from "./DeepHarnessPanel";
+import { AGENT_TOOL_NAMES } from "../lib/agent-tools";
 import { FolderIcon } from "./Icons";
 
 export default function ContextPanel() {
@@ -43,16 +44,29 @@ export default function ContextPanel() {
         <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 8 }}>工具（模型支持时自动启用）</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
-            <span>代码执行</span>
-            <Toggle on={tools.code} onClick={() => setTools({ code: !tools.code })} />
+            <span>文件工具</span>
+            <Toggle on={tools.fileTools} onClick={() => setTools({ fileTools: !tools.fileTools })} />
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
-            <span>文件读写</span>
-            <Toggle on={tools.file} onClick={() => setTools({ file: !tools.file })} />
+          {/* 工具名从 lib/agent-tools 派生，保证界面与实际下发的工具集不会各说各话 */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {AGENT_TOOL_NAMES.map((name) => (
+              <span
+                key={name}
+                style={{
+                  fontFamily: "ui-monospace, monospace",
+                  fontSize: 11,
+                  color: "var(--text-tertiary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  padding: "1px 6px",
+                }}
+              >
+                {name}
+              </span>
+            ))}
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 13 }}>
-            <span>网页搜索</span>
-            <Toggle on={tools.search} onClick={() => setTools({ search: !tools.search })} />
+          <div style={{ fontSize: 11.5, lineHeight: 1.6, color: "var(--text-tertiary)" }}>
+            文件操作按当前 Agent 的授权目录逐次校验。出于安全设计，不提供命令执行与网络访问能力。
           </div>
         </div>
       </div>

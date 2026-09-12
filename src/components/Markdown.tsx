@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import { marked } from "marked";
-import hljs from "highlight.js";
+import { highlightCodeBlocks } from "../lib/highlight";
+// 主题样式随本组件一起进异步块：只有真正要渲染消息时才加载，
+// 不占用首屏 CSS。语言定义在 lib/highlight 里按需注册。
 import "highlight.js/styles/atom-one-dark.css";
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -12,18 +14,13 @@ export default function Markdown({ content }: { content: string }) {
     try {
       return marked.parse(content) as string;
     } catch {
+      // 解析失败（例如流式传输中断在半截语法上）时退回纯文本，不丢内容。
       return content;
     }
   }, [content]);
 
   useEffect(() => {
-    ref.current?.querySelectorAll("pre code").forEach((el) => {
-      try {
-        hljs.highlightElement(el as HTMLElement);
-      } catch {
-        /* ignore */
-      }
-    });
+    if (ref.current) highlightCodeBlocks(ref.current);
   }, [html]);
 
   return <div className="markdown-body" ref={ref} dangerouslySetInnerHTML={{ __html: html }} />;

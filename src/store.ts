@@ -130,7 +130,7 @@ export const useAppStore = create<AppState>((set, get) => {
   modelsRefreshing: false,
   env: null,
   envChecking: false,
-  tools: { code: true, file: true, search: false },
+  tools: { fileTools: true },
   sidebarOpen: true,
   contextOpen: true,
   settingsOpen: false,
