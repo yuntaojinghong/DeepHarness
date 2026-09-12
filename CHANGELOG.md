@@ -16,9 +16,11 @@
   - 任务编排（`TaskRunner`）：规划 → 逐步执行 → 反思 → 失败自动重试一次 → 总结（模型失败时拼接步骤摘要兜底）→ 任务事件写入长期记忆；
   - SQLite 长期记忆库（rusqlite bundled，免系统依赖）：fact / preference / event / reflection 四类记忆，标签、重要度与分词召回，Worker 协议新增 `remember` / `recall` / `forget` / `memory_stats`；
   - Worker 协议扩展：`configure`（注入模型参数与 Agent 目录）、`plan`、`run_task` 及全部记忆操作，未配置请求返回明确错误。
+  - 主进程 IPC 命令层：`deepharness_configure` / `deepharness_get_config`（apiKey 打码）/ `deepharness_status` / `deepharness_run_task` / `deepharness_plan` / `deepharness_remember` / `deepharness_recall` / `deepharness_forget` / `deepharness_memory_stats`；模型配置持久化至 Agent 隔离目录（`config/agent_config.json`，不回显 Key），Worker 启动时自动注入已保存配置，未运行时命令自动拉起 Worker；注册表改为 `Arc` 持有并新增 `NativeAgentHandle` 托管状态，长任务不阻塞注册表全局锁。
 
 ### Changed
 - Windows 构建链补齐：MSYS2 侧补装 mingw-w64 头文件与 winpthreads（rusqlite bundled 编译 SQLite 所需）；Rust 链接统一启用 `link-self-contained`。
+- CI：`cargo test --no-run` 后新增导入表诊断步骤（解析测试 exe 静态/延迟导入并逐一校验目标 DLL 导出）；修复测试二进制 0xc0000139 —— tao 静态导入 `comctl32!TaskDialogIndirect`（仅 Common-Controls v6 导出），测试链接现嵌入带 v6 依赖的应用清单（`windows-app.manifest`）。
 
 ## [1.0.0-alpha.1] - 2026-09-12
 

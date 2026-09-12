@@ -15,7 +15,7 @@
 
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::AppResult;
 use crate::native::memory::MemoryStore;
@@ -25,7 +25,7 @@ use crate::native::reflector::{Reflector, StepReview};
 use crate::native::tools::{execute_tool, ToolContext};
 
 /// 单步执行记录（返回给前端 / 会话存储）。
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StepRecord {
     pub title: String,
@@ -39,7 +39,7 @@ pub struct StepRecord {
 }
 
 /// 任务执行结果。
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskOutcome {
     pub goal: String,

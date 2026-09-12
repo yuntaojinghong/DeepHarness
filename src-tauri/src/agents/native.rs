@@ -14,6 +14,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use crate::agents::agent_config::AgentModelConfig;
 use crate::error::{AppError, AppResult};
 use crate::paths::AgentDirs;
 use crate::{agents::worker, error::AppError as E};
@@ -39,6 +40,9 @@ struct NativeInner {
 pub struct NativeAgentRuntime {
     dirs: AgentDirs,
     worker_exe: PathBuf,
+    /// 应用数据根目录（Worker 的 PermissionStore 直接读取
+    /// `<data_root>/permissions.json`，授权状态自动同步）。
+    data_root: PathBuf,
     inner: Mutex<NativeInner>,
 }
 
@@ -46,10 +50,11 @@ impl NativeAgentRuntime {
     /// 创建运行时。`worker_exe` 为自我重执行的可执行文件路径
     /// （lib.rs setup 用 `current_exe()` 传入；测试可注入任意路径，
     /// 启动失败会以明确错误呈现而不 panic）。
-    pub fn new(dirs: AgentDirs, worker_exe: PathBuf) -> Self {
+    pub fn new(dirs: AgentDirs, worker_exe: PathBuf, data_root: PathBuf) -> Self {
         Self {
             dirs,
             worker_exe,
+            data_root,
             inner: Mutex::new(NativeInner {
                 child: None,
                 stdin: None,
@@ -149,6 +154,50 @@ impl NativeAgentRuntime {
             None => false,
         }
     }
+
+    /// 把已持久化的模型配置注入 Worker（从未配置过则静默跳过，
+    /// 由上层命令通过明确错误提示用户先完成配置）。
+    fn apply_saved_config(&self) -> AppResult<()> {
+        if let Some(cfg) = AgentModelConfig::load(&self.dirs) {
+            self.reconfigure(&cfg)?;
+        }
+        Ok(())
+    }
+
+    /// 向运行中的 Worker 发送 `configure`（热更新模型参数与权限视图）。
+    pub fn reconfigure(&self, cfg: &AgentModelConfig) -> AppResult<serde_json::Value> {
+        cfg.validate()?;
+        let payload = serde_json::json!({
+            "baseUrl": cfg.base_url,
+            "apiKey": cfg.api_key,
+            "model": cfg.model,
+            "agentId": self.id(),
+            "dataRoot": self.data_root.display().to_string(),
+        });
+        self.request("configure", payload)
+    }
+
+    /// 确保 Worker 存活：未运行则自动拉起并注入已保存的配置。
+    pub fn ensure_running(&self) -> AppResult<()> {
+        if !self.is_alive() {
+            crate::agents::AgentRuntime::start(self)?;
+        }
+        Ok(())
+    }
+
+    /// Worker 的就绪状态（未运行时返回 running:false 而非报错）。
+    pub fn readiness(&self) -> AppResult<serde_json::Value> {
+        if !self.is_alive() {
+            return Ok(serde_json::json!({ "running": false, "configured": false }));
+        }
+        let resp = self.request("status", serde_json::Value::Null)?;
+        Ok(serde_json::json!({
+            "running": true,
+            "configured": resp.get("configured").and_then(|v| v.as_bool()).unwrap_or(false),
+            "pid": resp.get("pid").cloned().unwrap_or(serde_json::Value::Null),
+            "version": resp.get("version").cloned().unwrap_or(serde_json::Value::Null),
+        }))
+    }
 }
 
 impl crate::agents::AgentRuntime for NativeAgentRuntime {
@@ -170,6 +219,15 @@ impl crate::agents::AgentRuntime for NativeAgentRuntime {
         // 握手：ping 确认协议通
         let payload = self.request("ping", serde_json::Value::Null)?;
         tracing::info!(?payload, "DeepHarness Worker 握手成功");
+        // 注入模型配置与权限视图（已保存过配置时）
+        match self.apply_saved_config() {
+            Ok(()) => {}
+            Err(e) => {
+                // 配置注入失败不让启动失败：Worker 保持存活（未配置态），
+                // 用户修复配置后经 configure 命令热注入即可。
+                tracing::warn!("DeepHarness Worker 配置注入失败（未配置态运行）: {e}");
+            }
+        }
         Ok(())
     }
 
@@ -248,9 +306,17 @@ mod tests {
         AgentDirs::from_root(tmp.join("agents").join("deepharness"), "deepharness")
     }
 
+    fn data_root() -> PathBuf {
+        std::env::temp_dir().join(format!("dh_native_data_{}", std::process::id()))
+    }
+
+    fn runtime() -> NativeAgentRuntime {
+        NativeAgentRuntime::new(dirs(), PathBuf::from("Z:/no/such/exe.exe"), data_root())
+    }
+
     #[test]
     fn start_with_bogus_exe_fails_cleanly() {
-        let rt = NativeAgentRuntime::new(dirs(), PathBuf::from("Z:/no/such/exe.exe"));
+        let rt = runtime();
         assert!(crate::agents::AgentRuntime::start(&rt).is_err());
         assert_eq!(
             rt.status(),
@@ -261,15 +327,47 @@ mod tests {
 
     #[test]
     fn stop_is_idempotent() {
-        let rt = NativeAgentRuntime::new(dirs(), PathBuf::from("Z:/no/such/exe.exe"));
+        let rt = runtime();
         assert!(crate::agents::AgentRuntime::stop(&rt).is_ok());
         assert!(crate::agents::AgentRuntime::stop(&rt).is_ok());
     }
 
     #[test]
     fn request_without_worker_errors() {
-        let rt = NativeAgentRuntime::new(dirs(), PathBuf::from("Z:/no/such/exe.exe"));
+        let rt = runtime();
         assert!(rt.request("ping", serde_json::Value::Null).is_err());
+    }
+
+    #[test]
+    fn readiness_reports_not_running_for_dead_worker() {
+        let rt = runtime();
+        let info = rt.readiness().expect("未运行时 readiness 不应报错");
+        assert_eq!(info["running"], false);
+        assert_eq!(info["configured"], false);
+    }
+
+    #[test]
+    fn reconfigure_rejects_incomplete_config() {
+        let rt = runtime();
+        let cfg = AgentModelConfig {
+            base_url: "https://api.deepseek.com".to_string(),
+            api_key: String::new(),
+            model: "deepseek-chat".to_string(),
+        };
+        let err = rt.reconfigure(&cfg).expect_err("缺 apiKey 应报错");
+        assert!(err.to_string().contains("不能为空"), "{err}");
+    }
+
+    #[test]
+    fn reconfigure_without_worker_errors_clearly() {
+        let rt = runtime();
+        let cfg = AgentModelConfig {
+            base_url: "https://api.deepseek.com".to_string(),
+            api_key: "sk-test".to_string(),
+            model: "deepseek-chat".to_string(),
+        };
+        let err = rt.reconfigure(&cfg).expect_err("Worker 未运行应报错");
+        assert!(err.to_string().contains("Worker"), "{err}");
     }
 
     #[test]

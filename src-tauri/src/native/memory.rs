@@ -12,12 +12,12 @@
 use std::path::Path;
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 
 /// 一条记忆。
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Memory {
     pub id: i64,
@@ -30,7 +30,7 @@ pub struct Memory {
 }
 
 /// 记忆库统计。
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryStats {
     pub total: i64,

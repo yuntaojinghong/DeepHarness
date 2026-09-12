@@ -14,11 +14,13 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
+// lib 构建中 wait_ready 为死代码(仅测试使用), 但测试构建需要此 trait 导入
+#[allow(unused_imports)]
+use crate::agents::AgentRuntime;
 use crate::error::{AppError, AppResult};
 use crate::paths::AgentDirs;
 use crate::permissions::canonicalize_lenient;
 use tauri::Manager;
-use crate::agents::AgentRuntime;
 
 /// dsh 监听端口。
 pub const DSH_PORT: u16 = 3080;

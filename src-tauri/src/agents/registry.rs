@@ -5,10 +5,11 @@
 //! 自己的状态上。
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
+use crate::agents::AgentRuntime;
 use crate::error::{AppError, AppResult};
 use crate::paths::{agent_root, ensure_agent_dirs};
 
@@ -23,12 +24,12 @@ pub struct AgentOverview {
 
 /// 注册表。
 pub struct AgentRegistry {
-    runtimes: Mutex<HashMap<&'static str, Box<dyn crate::agents::AgentRuntime>>>,
+    runtimes: Mutex<HashMap<&'static str, Arc<dyn crate::agents::AgentRuntime>>>,
 }
 
 impl AgentRegistry {
     /// 注册一个运行时（每个 id 只能注册一次）。
-    pub fn register(&self, runtime: Box<dyn crate::agents::AgentRuntime>) -> AppResult<()> {
+    pub fn register(&self, runtime: Arc<dyn crate::agents::AgentRuntime>) -> AppResult<()> {
         let mut map = self.runtimes.lock().unwrap();
         if map.contains_key(runtime.id()) {
             return Err(AppError::Other(format!(
@@ -55,7 +56,10 @@ impl AgentRegistry {
         list
     }
 
-    fn get(&self, agent: &str) -> AppResult<std::sync::MutexGuard<'_, HashMap<&'static str, Box<dyn crate::agents::AgentRuntime>>>> {
+    fn get(
+        &self,
+        agent: &str,
+    ) -> AppResult<std::sync::MutexGuard<'_, HashMap<&'static str, Arc<dyn crate::agents::AgentRuntime>>>> {
         crate::paths::validate_agent_id(agent)?;
         let map = self.runtimes.lock().unwrap();
         if !map.contains_key(agent) {
@@ -144,6 +148,191 @@ pub fn agent_status(
     agent: String,
 ) -> AppResult<crate::agents::AgentStatus> {
     registry.status_of(&agent)
+}
+
+// ---- DeepHarness Native Agent 专属命令 ----
+//
+// 注册表负责所有 Agent 的统一启停/状态；DeepHarness 的任务与记忆
+// 操作通过 Tauri 托管的 `NativeAgentHandle` 直接访问 Native 运行时：
+// 长任务（run_task 可能数十秒）不会持有注册表全局锁，其它 Agent 的
+// 状态查询不受阻塞。
+
+/// DeepHarness Native 运行时的共享句柄（Tauri 托管状态）。
+pub struct NativeAgentHandle(pub Arc<crate::agents::native::NativeAgentRuntime>);
+
+/// 运行前置检查：模型配置已保存（Worker configure 依赖它）。
+fn ensure_native_configured(
+    rt: &crate::agents::native::NativeAgentRuntime,
+) -> AppResult<()> {
+    if crate::agents::agent_config::AgentModelConfig::load(rt.dirs()).is_none() {
+        return Err(AppError::Other(
+            "DeepHarness 尚未配置模型参数，请先在设置中填写 API Key（deepharness_configure）"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// 配置模型接入参数：落盘并热注入运行中的 Worker。
+#[tauri::command]
+pub fn deepharness_configure(
+    handle: tauri::State<'_, NativeAgentHandle>,
+    base_url: String,
+    api_key: String,
+    model: String,
+) -> AppResult<serde_json::Value> {
+    let cfg = crate::agents::agent_config::AgentModelConfig {
+        base_url,
+        api_key,
+        model,
+    };
+    cfg.validate()?;
+    let rt = &handle.0;
+    cfg.save(rt.dirs())?;
+    let applied = if rt.is_alive() {
+        rt.reconfigure(&cfg)?;
+        true
+    } else {
+        // 未运行：仅落盘，下次启动自动注入
+        false
+    };
+    tracing::info!(model = %cfg.model, applied, "DeepHarness 模型配置已更新");
+    Ok(serde_json::json!({
+        "saved": true,
+        "applied": applied,
+        "model": cfg.model,
+    }))
+}
+
+/// 读取模型配置（apiKey 打码，仅返回尾部 4 位便于确认是哪把 Key）。
+#[tauri::command]
+pub fn deepharness_get_config(
+    handle: tauri::State<'_, NativeAgentHandle>,
+) -> AppResult<serde_json::Value> {
+    let rt = &handle.0;
+    match crate::agents::agent_config::AgentModelConfig::load(rt.dirs()) {
+        Some(cfg) => {
+            let tail: String = cfg.api_key.chars().rev().take(4).collect();
+            Ok(serde_json::json!({
+                "baseUrl": cfg.base_url,
+                "model": cfg.model,
+                "apiKeyTail": tail,
+                "hasApiKey": true,
+            }))
+        }
+        None => Ok(serde_json::json!({
+            "baseUrl": serde_json::Value::Null,
+            "model": serde_json::Value::Null,
+            "apiKeyTail": serde_json::Value::Null,
+            "hasApiKey": false,
+        })),
+    }
+}
+
+/// 查询 DeepHarness Worker 的就绪状态（未运行返回 running:false）。
+#[tauri::command]
+pub fn deepharness_status(
+    handle: tauri::State<'_, NativeAgentHandle>,
+) -> AppResult<serde_json::Value> {
+    handle.0.readiness()
+}
+
+/// 运行完整任务循环：规划 → 逐步执行（工具受权限白名单约束）→ 反思 → 记忆沉淀。
+#[tauri::command]
+pub fn deepharness_run_task(
+    handle: tauri::State<'_, NativeAgentHandle>,
+    goal: String,
+    context: Option<String>,
+) -> AppResult<crate::native::executor::TaskOutcome> {
+    let rt = &handle.0;
+    ensure_native_configured(rt)?;
+    rt.ensure_running()?;
+    let payload = serde_json::json!({ "goal": goal, "context": context.unwrap_or_default() });
+    let value = rt.request("run_task", payload)?;
+    serde_json::from_value(value).map_err(|e| AppError::Other(format!("任务结果解析失败: {e}")))
+}
+
+/// 仅生成结构化计划，不执行任何工具。
+#[tauri::command]
+pub fn deepharness_plan(
+    handle: tauri::State<'_, NativeAgentHandle>,
+    goal: String,
+    context: Option<String>,
+) -> AppResult<crate::native::planner::Plan> {
+    let rt = &handle.0;
+    ensure_native_configured(rt)?;
+    rt.ensure_running()?;
+    let payload = serde_json::json!({ "goal": goal, "context": context.unwrap_or_default() });
+    let value = rt.request("plan", payload)?;
+    serde_json::from_value(value).map_err(|e| AppError::Other(format!("计划解析失败: {e}")))
+}
+
+/// 写入一条长期记忆，返回记忆 id。
+#[tauri::command]
+pub fn deepharness_remember(
+    handle: tauri::State<'_, NativeAgentHandle>,
+    kind: String,
+    content: String,
+    tags: Option<Vec<String>>,
+    importance: Option<f64>,
+) -> AppResult<i64> {
+    let rt = &handle.0;
+    ensure_native_configured(rt)?;
+    rt.ensure_running()?;
+    let payload = serde_json::json!({
+        "kind": kind,
+        "content": content,
+        "tags": tags.unwrap_or_default(),
+        "importance": importance.unwrap_or(0.5),
+    });
+    let value = rt.request("remember", payload)?;
+    value
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| AppError::Other("remember 响应缺少 id".to_string()))
+}
+
+/// 按关键词检索长期记忆。
+#[tauri::command]
+pub fn deepharness_recall(
+    handle: tauri::State<'_, NativeAgentHandle>,
+    query: String,
+    limit: Option<u32>,
+) -> AppResult<Vec<crate::native::memory::Memory>> {
+    let rt = &handle.0;
+    ensure_native_configured(rt)?;
+    rt.ensure_running()?;
+    let payload = serde_json::json!({ "query": query, "limit": limit.unwrap_or(5) });
+    let value = rt.request("recall", payload)?;
+    serde_json::from_value(value).map_err(|e| AppError::Other(format!("记忆解析失败: {e}")))
+}
+
+/// 删除一条长期记忆，返回该 id 是否存在过。
+#[tauri::command]
+pub fn deepharness_forget(
+    handle: tauri::State<'_, NativeAgentHandle>,
+    id: i64,
+) -> AppResult<bool> {
+    let rt = &handle.0;
+    ensure_native_configured(rt)?;
+    rt.ensure_running()?;
+    let value = rt.request("forget", serde_json::json!({ "id": id }))?;
+    value
+        .get("existed")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| AppError::Other("forget 响应缺少 existed".to_string()))
+}
+
+/// 长期记忆库统计。
+#[tauri::command]
+pub fn deepharness_memory_stats(
+    handle: tauri::State<'_, NativeAgentHandle>,
+) -> AppResult<crate::native::memory::MemoryStats> {
+    let rt = &handle.0;
+    ensure_native_configured(rt)?;
+    rt.ensure_running()?;
+    let value = rt.request("memory_stats", serde_json::Value::Null)?;
+    serde_json::from_value(value).map_err(|e| AppError::Other(format!("统计解析失败: {e}")))
 }
 
 // ---- 会话命令（每 Agent 独立会话库） ----
@@ -269,13 +458,13 @@ mod tests {
     #[test]
     fn register_start_stop_status_flow() {
         let registry = AgentRegistry::default();
-        registry.register(Box::new(FakeRuntime::new("deepseek-harness"))).unwrap();
-        registry.register(Box::new(FakeRuntime::new("codex"))).unwrap();
-        registry.register(Box::new(FakeRuntime::new("deepharness"))).unwrap();
+        registry.register(Arc::new(FakeRuntime::new("deepseek-harness"))).unwrap();
+        registry.register(Arc::new(FakeRuntime::new("codex"))).unwrap();
+        registry.register(Arc::new(FakeRuntime::new("deepharness"))).unwrap();
 
         // 重复注册被拒绝
         assert!(registry
-            .register(Box::new(FakeRuntime::new("codex")))
+            .register(Arc::new(FakeRuntime::new("codex")))
             .is_err());
 
         assert_eq!(registry.overview().len(), 3);

@@ -19,14 +19,14 @@
 //! `tool: null` 表示纯回答步骤（如最终总结），执行器直接把
 //! `expected` 当作说明展示，不调用工具。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::native::model::{ChatMessage, ModelProvider};
 use crate::native::tools::TOOLS;
 
 /// 单个计划步骤。
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanStep {
     pub title: String,
@@ -39,7 +39,7 @@ pub struct PlanStep {
 }
 
 /// 完整计划。
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
     pub goal: String,

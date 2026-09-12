@@ -5,6 +5,7 @@
 //! 资源配额（Windows Job Object）。任何一个运行时的崩溃 / 卡死
 //! / 重启都不会波及其余两个。
 
+pub mod agent_config;
 pub mod codex;
 pub mod dsh;
 pub mod native;

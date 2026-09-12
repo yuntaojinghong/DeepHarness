@@ -10,14 +10,14 @@
 //! 评审失败（模型不可用 / 输出非法）不阻塞任务：`review_step` 会退化为
 //! "按工具层错误判断成败"的保守策略，保证任务循环永远有确定性出口。
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::native::model::{ChatMessage, ModelProvider};
 use crate::native::planner::PlanStep;
 
 /// 一步执行后的评审结论。
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StepReview {
     pub success: bool,

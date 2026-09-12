@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::native::executor::TaskRunner;
-use crate::native::memory::{MemoryStore, MemoryStats, Memory};
+use crate::native::memory::{MemoryStore, Memory};
 use crate::native::model::{DeepSeekProvider, ModelProvider};
 use crate::native::planner::{Plan, Planner};
 use crate::native::tools::ToolContext;

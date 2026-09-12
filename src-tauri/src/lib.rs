@@ -21,7 +21,6 @@ mod sessions;
 
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
@@ -183,10 +182,17 @@ fn check_update() -> Option<UpdateInfo> {
 }
 
 /// 组装三个 Agent 的注册表（启动期调用一次）。
+///
+/// 返回注册表与 DeepHarness Native 运行时的共享句柄：注册表做统一
+/// 启停/状态管理，句柄供 DeepHarness 专属命令直接访问（避免长任务
+/// 阻塞注册表全局锁）。
 fn build_agent_registry(
     app: &tauri::AppHandle,
     data_dir: &std::path::Path,
-) -> error::AppResult<AgentRegistry> {
+) -> error::AppResult<(
+    AgentRegistry,
+    std::sync::Arc<agents::native::NativeAgentRuntime>,
+)> {
     agents::registry::ensure_all_agent_dirs(data_dir)?;
     let registry = AgentRegistry::default();
 
@@ -194,11 +200,11 @@ fn build_agent_registry(
     let dsh_dirs = AgentDirs::from_root(paths::agent_root(data_dir, "deepseek-harness"), "deepseek-harness");
     let node = agents::dsh::DshRuntime::find_resource(app, "node/node.exe");
     let dsh_bin = agents::dsh::DshRuntime::find_resource(app, "dsh/node_modules/@deepseek-ai/dsh/lib/bin.js");
-    registry.register(Box::new(agents::dsh::DshRuntime::new(dsh_dirs, node, dsh_bin)))?;
+    registry.register(std::sync::Arc::new(agents::dsh::DshRuntime::new(dsh_dirs, node, dsh_bin)))?;
 
     // 2) Codex：系统 codex CLI（按需拉起，CODEX_HOME 隔离）
     let codex_dirs = AgentDirs::from_root(paths::agent_root(data_dir, "codex"), "codex");
-    registry.register(Box::new(agents::codex::CodexRuntime::new(
+    registry.register(std::sync::Arc::new(agents::codex::CodexRuntime::new(
         codex_dirs,
         Some(app.clone()),
     )))?;
@@ -206,12 +212,14 @@ fn build_agent_registry(
     // 3) DeepHarness：自研 Agent（自我重执行 Sidecar Worker）
     let native_dirs = AgentDirs::from_root(paths::agent_root(data_dir, "deepharness"), "deepharness");
     let worker_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("DeepHarness"));
-    registry.register(Box::new(agents::native::NativeAgentRuntime::new(
+    let native = std::sync::Arc::new(agents::native::NativeAgentRuntime::new(
         native_dirs,
         worker_exe,
-    )))?;
+        data_dir.to_path_buf(),
+    ));
+    registry.register(native.clone())?;
 
-    Ok(registry)
+    Ok((registry, native))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -237,9 +245,10 @@ pub fn run() {
             app.manage(sessions);
 
             // Agent 注册表：三个相互隔离的运行时
-            let registry = build_agent_registry(app.handle(), &data_dir)
+            let (registry, native) = build_agent_registry(app.handle(), &data_dir)
                 .map_err(|e| format!("初始化 Agent 注册表失败: {e}"))?;
             app.manage(registry);
+            app.manage(agents::registry::NativeAgentHandle(native));
 
             let show_i = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -290,6 +299,16 @@ pub fn run() {
             agents::registry::agent_start,
             agents::registry::agent_stop,
             agents::registry::agent_status,
+            // DeepHarness Native Agent 命令
+            agents::registry::deepharness_configure,
+            agents::registry::deepharness_get_config,
+            agents::registry::deepharness_status,
+            agents::registry::deepharness_run_task,
+            agents::registry::deepharness_plan,
+            agents::registry::deepharness_remember,
+            agents::registry::deepharness_recall,
+            agents::registry::deepharness_forget,
+            agents::registry::deepharness_memory_stats,
             // 会话命令
             agents::registry::session_list,
             agents::registry::session_get,
