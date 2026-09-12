@@ -23,6 +23,12 @@ export interface Conversation {
   title: string;
   messages: ChatMessage[];
   modelId: string;
+  /**
+   * 该会话归属的 Agent（与 Rust 侧 paths::AGENT_IDS 一致）。
+   * 会话、工作区、授权、日志均按 Agent 隔离，切换 Agent 时只看到自己的会话。
+   * 历史数据可能缺省，读取时按 `deepseek-harness` 兜底。
+   */
+  agent: string;
   systemPromptId?: string;
   workspace?: string;
   archived?: boolean;

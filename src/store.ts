@@ -12,6 +12,8 @@ import {
   saveOfficialModels,
   saveSelected,
   saveSettings,
+  saveActiveAgent,
+  loadActiveAgent,
   uid,
   readDiskData,
   writeDiskData,
@@ -19,10 +21,35 @@ import {
   dedupeModels,
 } from "./lib/storage";
 import { fetchOfficialModels } from "./lib/models";
+import { AGENT_IDS, type AgentId } from "./lib/env";
+import {
+  agentList,
+  type AgentOverview,
+  type AgentStatusView,
+} from "./lib/deepharness";
+
+/** 某个 Agent 名下的会话（按更新时间倒序无关，保持既有顺序）。 */
+function conversationsOf(list: Conversation[], agent: AgentId): Conversation[] {
+  return list.filter((c) => c.agent === agent);
+}
+
+/** 启动时确定激活会话：优先上次选中项，其次该 Agent 的第一条。 */
+function bootstrapActiveId(list: Conversation[], agent: AgentId): string | null {
+  const mine = conversationsOf(list, agent);
+  const selected = loadSelected();
+  if (mine.some((c) => c.id === selected)) return selected;
+  return mine[0]?.id ?? null;
+}
 
 interface AppState {
   conversations: Conversation[];
   activeId: string | null;
+  /** 当前激活的 Agent；三个 Agent 的界面与会话完全隔离。 */
+  activeAgent: AgentId;
+  /** 三个 Agent 的运行时概览（状态由 Rust 注册表上报）。 */
+  agents: AgentOverview[];
+  agentsRefreshing: boolean;
+  agentsError: string | null;
   settings: AppSettings;
   models: ModelConfig[];
   officialModels: ModelConfig[];
@@ -41,6 +68,10 @@ interface AppState {
   activeConversation: () => Conversation | null;
   hydrate: () => Promise<void>;
   setActive: (id: string) => void;
+  setActiveAgent: (agent: AgentId) => void;
+  agentOverview: (agent: AgentId) => AgentOverview | null;
+  agentStatus: (agent: AgentId) => AgentStatusView | undefined;
+  refreshAgents: () => Promise<void>;
   newConversation: (modelId?: string) => string;
   renameConversation: (id: string, title: string) => void;
   deleteConversation: (id: string) => void;
@@ -66,14 +97,16 @@ interface AppState {
   setSearchQuery: (q: string) => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
-  conversations: loadConversations(),
-  activeId: (() => {
-    const list = loadConversations();
-    const sel = loadSelected();
-    if (list.some((c) => c.id === sel)) return sel;
-    return list[0]?.id ?? null;
-  })(),
+export const useAppStore = create<AppState>((set, get) => {
+  const bootConversations = loadConversations();
+  const bootAgent = loadActiveAgent();
+  return {
+  conversations: bootConversations,
+  activeId: bootstrapActiveId(bootConversations, bootAgent),
+  activeAgent: bootAgent,
+  agents: [],
+  agentsRefreshing: false,
+  agentsError: null,
   settings: loadSettings(),
   models: loadModels(),
   officialModels: loadOfficialModels(),
@@ -91,7 +124,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   activeConversation: () => {
     const s = get();
-    return s.conversations.find((c) => c.id === s.activeId) ?? null;
+    const found = s.conversations.find((c) => c.id === s.activeId) ?? null;
+    // 只返回属于当前 Agent 的会话，避免切换后残留上一个 Agent 的内容。
+    return found && found.agent === s.activeAgent ? found : null;
   },
 
   hydrate: async () => {
@@ -102,14 +137,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       saveModels(disk.models);
       saveOfficialModels(disk.officialModels);
       saveSelected(disk.selected);
+      const agent = get().activeAgent;
+      const mine = conversationsOf(disk.conversations, agent);
       set({
         conversations: disk.conversations,
         settings: disk.settings,
         models: disk.models,
         officialModels: disk.officialModels,
-        activeId: disk.conversations.some((c) => c.id === disk.selected)
+        activeId: mine.some((c) => c.id === disk.selected)
           ? disk.selected
-          : disk.conversations[0]?.id ?? null,
+          : mine[0]?.id ?? null,
         hydrated: true,
       });
     } else {
@@ -129,6 +166,42 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeId: id });
   },
 
+  setActiveAgent: (agent) => {
+    if (!(AGENT_IDS as readonly string[]).includes(agent)) return;
+    const s = get();
+    if (s.activeAgent === agent) return;
+    saveActiveAgent(agent);
+    // 切换 Agent 时把激活会话切换到该 Agent 名下，不跨 Agent 泄漏内容。
+    const mine = conversationsOf(s.conversations, agent);
+    const selected = loadSelected();
+    const nextId = mine.some((c) => c.id === selected) ? selected : mine[0]?.id ?? null;
+    if (nextId) saveSelected(nextId);
+    set({ activeAgent: agent, activeId: nextId, searchQuery: "" });
+    // 状态徽标随切换即时刷新（失败不阻塞界面）。
+    void get().refreshAgents();
+  },
+
+  agentOverview: (agent) => get().agents.find((a) => a.id === agent) ?? null,
+
+  agentStatus: (agent) => get().agents.find((a) => a.id === agent)?.status,
+
+  refreshAgents: async () => {
+    if (get().agentsRefreshing) return;
+    set({ agentsRefreshing: true });
+    try {
+      const list = await agentList();
+      // 只保留已知 Agent，防止后端新增 ID 时污染界面状态。
+      set({
+        agents: list.filter((a) => (AGENT_IDS as readonly string[]).includes(a.id)),
+        agentsError: null,
+      });
+    } catch (e) {
+      set({ agentsError: e instanceof Error ? e.message : String(e) });
+    } finally {
+      set({ agentsRefreshing: false });
+    }
+  },
+
   newConversation: (modelId) => {
     const s = get();
     const id = uid();
@@ -137,6 +210,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       title: "新会话",
       messages: [],
       modelId: modelId || s.settings.defaultModelId,
+      agent: s.activeAgent,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -154,9 +228,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   deleteConversation: (id) => {
-    const list = get().conversations.filter((c) => c.id !== id);
+    const s = get();
+    const list = s.conversations.filter((c) => c.id !== id);
     saveConversations(list);
-    const next = list[0]?.id ?? null;
+    // 兜底会话必须落在同一个 Agent 名下。
+    const mine = conversationsOf(list, s.activeAgent);
+    const next = mine[0]?.id ?? null;
     if (next) saveSelected(next);
     set({ conversations: list, activeId: next });
   },
@@ -169,9 +246,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   searchConversations: () => {
     const s = get();
+    const mine = conversationsOf(s.conversations, s.activeAgent);
     const q = s.searchQuery.trim().toLowerCase();
-    if (!q) return s.conversations;
-    return s.conversations.filter((c) => {
+    if (!q) return mine;
+    return mine.filter((c) => {
       if (c.title.toLowerCase().includes(q)) return true;
       return c.messages.some((m) => m.content.toLowerCase().includes(q));
     });
@@ -236,7 +314,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   setEnvOpen: (v) => set({ envOpen: v }),
   setWelcomeOpen: (v) => set({ welcomeOpen: v }),
   setSearchQuery: (q) => set({ searchQuery: q }),
-}));
+  };
+});
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 useAppStore.subscribe((state) => {

@@ -1,18 +1,45 @@
 import type { AppSettings, Conversation, ModelConfig, Persona } from "../types";
+import { AGENT_IDS, type AgentId } from "./env";
 
 const K_CONVERSATIONS = "dh.conversations";
 const K_SETTINGS = "dh.settings";
 const K_MODELS = "dh.models";
 const K_OFFICIAL_MODELS = "dh.officialModels";
 const K_SELECTED = "dh.selected";
+const K_ACTIVE_AGENT = "dh.activeAgent";
 
 export function uid(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** 会话默认归属的 Agent（历史数据未记录 agent 字段时使用）。 */
+export const DEFAULT_AGENT_ID = "deepseek-harness";
+
+/**
+ * 补全历史会话缺失的字段。
+ *
+ * 旧版本的会话没有 `agent` 字段，直接读取会得到 `undefined`，
+ * 导致按 Agent 过滤时会话「凭空消失」。这里统一兜底到默认 Agent。
+ */
+export function normalizeConversation(raw: Partial<Conversation>): Conversation {
+  return {
+    id: raw.id ?? uid(),
+    title: raw.title ?? "新会话",
+    messages: raw.messages ?? [],
+    modelId: raw.modelId ?? DEFAULT_SETTINGS.defaultModelId,
+    agent: raw.agent ?? DEFAULT_AGENT_ID,
+    systemPromptId: raw.systemPromptId,
+    workspace: raw.workspace,
+    archived: raw.archived,
+    createdAt: raw.createdAt ?? Date.now(),
+    updatedAt: raw.updatedAt ?? Date.now(),
+  };
+}
+
 export function loadConversations(): Conversation[] {
   try {
-    return JSON.parse(localStorage.getItem(K_CONVERSATIONS) || "[]");
+    const raw = JSON.parse(localStorage.getItem(K_CONVERSATIONS) || "[]") as Partial<Conversation>[];
+    return raw.map(normalizeConversation);
   } catch {
     return [];
   }
@@ -120,6 +147,25 @@ export function saveSelected(id: string) {
   localStorage.setItem(K_SELECTED, id);
 }
 
+/** 读取当前激活的 Agent；非法或缺失时回退到默认 Agent。 */
+export function loadActiveAgent(): AgentId {
+  try {
+    const raw = localStorage.getItem(K_ACTIVE_AGENT);
+    if (raw && (AGENT_IDS as readonly string[]).includes(raw)) return raw as AgentId;
+  } catch {
+    /* localStorage 不可用时按默认处理 */
+  }
+  return DEFAULT_AGENT_ID as AgentId;
+}
+
+export function saveActiveAgent(id: string) {
+  try {
+    localStorage.setItem(K_ACTIVE_AGENT, id);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function exportConversationJson(conv: Conversation) {
   const blob = new Blob([JSON.stringify(conv, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
@@ -197,7 +243,7 @@ export async function readDiskData(): Promise<DiskData | null> {
     const parsed = JSON.parse(raw) as Partial<DiskData>;
     const official = parsed.officialModels ?? [];
     return {
-      conversations: parsed.conversations ?? [],
+      conversations: (parsed.conversations ?? []).map(normalizeConversation),
       settings: { ...DEFAULT_SETTINGS, ...(parsed.settings ?? {}) },
       models: dedupeModels(BUILTIN_MODELS, official, (parsed.models ?? []).filter((m) => !m.builtin)),
       officialModels: official,

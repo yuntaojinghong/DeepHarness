@@ -1,4 +1,6 @@
 import { useAppStore } from "../store";
+import { AGENT_META } from "../lib/deepharness";
+import DeepHarnessPanel from "./DeepHarnessPanel";
 import { FolderIcon } from "./Icons";
 
 export default function ContextPanel() {
@@ -8,6 +10,12 @@ export default function ContextPanel() {
   const settings = useAppStore((s) => s.settings);
   const setSettings = useAppStore((s) => s.setSettings);
   const models = useAppStore((s) => s.models);
+  const activeAgent = useAppStore((s) => s.activeAgent);
+
+  // 任务型 Agent 的右侧面板是 Worker / 模型配置 / 记忆库，与对话无关。
+  if (AGENT_META[activeAgent].hasTaskConsole) {
+    return <DeepHarnessPanel />;
+  }
 
   const model = models.find((m) => m.id === (conv?.modelId ?? settings.defaultModelId));
   const tokens = conv ? conv.messages.reduce((acc, m) => acc + Math.ceil(m.content.length / 2), 0) : 0;

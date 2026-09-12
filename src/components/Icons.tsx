@@ -113,6 +113,21 @@ export const UserIcon = ({ size = 16 }: IconProps) => (
   </svg>
 );
 
+export const PowerIcon = ({ size = 16 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M12 3v9" />
+    <path d="M6.4 6.6a8 8 0 1 0 11.2 0" />
+  </svg>
+);
+
+export const ExternalLinkIcon = ({ size = 16 }: IconProps) => (
+  <svg {...base(size)}>
+    <path d="M13 4h7v7" />
+    <path d="M20 4 10.5 13.5" />
+    <path d="M18 14.5V18a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3.5" />
+  </svg>
+);
+
 export const PythonIcon = ({ size = 16 }: IconProps) => (
   <svg width={size} height={size} viewBox="0 0 24 24" style={{ display: "block" }}>
     <rect width="24" height="24" rx="6" fill="#3776ab" />

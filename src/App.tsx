@@ -8,7 +8,7 @@ import SettingsModal from "./components/SettingsModal";
 import EnvModal from "./components/EnvModal";
 import WelcomeModal from "./components/WelcomeModal";
 import SplashScreen from "./components/SplashScreen";
-import { isTauri } from "./lib/env";
+import { checkEnv, isTauri } from "./lib/env";
 
 export default function App() {
   const theme = useAppStore((s) => s.settings.theme);
@@ -20,6 +20,8 @@ export default function App() {
   const setEnv = useAppStore((s) => s.setEnv);
   const hydrate = useAppStore((s) => s.hydrate);
   const refreshModels = useAppStore((s) => s.refreshModels);
+  const refreshAgents = useAppStore((s) => s.refreshAgents);
+  const activeAgent = useAppStore((s) => s.activeAgent);
   const welcomeOpen = useAppStore((s) => s.welcomeOpen);
   const setWelcomeOpen = useAppStore((s) => s.setWelcomeOpen);
   const hasKey = useAppStore((s) => Object.values(s.settings.apiKeys).some((k) => k.trim()));
@@ -49,13 +51,6 @@ export default function App() {
   }, [fontSize]);
 
   useEffect(() => {
-    import("./lib/env")
-      .then((m) => m.checkEnv())
-      .then(setEnv)
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
     if (!hasKey) setWelcomeOpen(true);
   }, [hasKey, setWelcomeOpen]);
 
@@ -65,29 +60,59 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasKey]);
 
-  // 启动流程：Tauri 模式启动内置 DeepSeek Harness 服务后跳转；浏览器预览则直接进入
+  // 运行中的 Agent 会因崩溃 / 退出而变更状态，按固定间隔轻量轮询概览。
+  // 未运行时开销仅一次 IPC，不影响界面响应。
   useEffect(() => {
-    if (!isTauri()) {
-      const t = setTimeout(() => setLeaving(true), 1300);
-      return () => clearTimeout(t);
-    }
+    if (!isTauri()) return;
+    const t = setInterval(() => {
+      void refreshAgents();
+    }, 5000);
+    return () => clearInterval(t);
+  }, [refreshAgents]);
+
+  // 启动流程：只做本地初始化后进入自研 React 主界面。
+  //
+  // 三个 Agent 全部在本界面内使用；官方 Web UI 不再作为启动跳转目标，
+  // 而是由用户在需要时从 Agent 卡片中自行打开。初始化失败不阻塞进入，
+  // 只在启动页提示，保证零配置用户也能直接看到界面。
+  useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const enterAfter = (ms: number) => {
+      timer = setTimeout(() => {
+        if (!cancelled) setLeaving(true);
+      }, ms);
+    };
+
     (async () => {
+      if (!isTauri()) {
+        setBootStatus("浏览器预览模式 · 桌面能力不可用");
+        enterAfter(600);
+        return;
+      }
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        setBootStatus("正在启动 DeepHarness 服务…");
-        await invoke("start_dsh");
+        setBootStatus("正在检测本机运行环境…");
+        const env = await checkEnv();
         if (cancelled) return;
-        setBootStatus("服务已就绪，正在进入…");
-        window.location.href = "http://127.0.0.1:3080";
+        setEnv(env);
+
+        setBootStatus("正在读取 Agent 状态…");
+        await refreshAgents();
+        if (cancelled) return;
+
+        setBootStatus("正在进入工作台…");
+        enterAfter(240);
       } catch (e) {
-        if (!cancelled) setBootError(`启动失败：${String(e)}`);
+        if (!cancelled) setBootError(`初始化失败：${String(e)}`);
       }
     })();
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [refreshAgents, setEnv]);
 
   useEffect(() => {
     if (!leaving) return;
@@ -125,7 +150,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell agent-${activeAgent}`}>
       <TitleBar />
       <div className="body">
         {sidebarOpen && <Sidebar />}

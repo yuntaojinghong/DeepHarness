@@ -3,22 +3,18 @@ import { useAppStore } from "../store";
 import type { ChatMessage, ToolCallRecord } from "../types";
 import { streamChat, type ToolCallChunk } from "../lib/llm";
 import { listDir, readTextFile, writeTextFile, type AgentId } from "../lib/env";
+import { AGENT_META } from "../lib/deepharness";
 import { uid, exportConversationJson, exportConversationMarkdown, PERSONAS, notify } from "../lib/storage";
 import MessageBubble from "./MessageBubble";
 import Composer from "./Composer";
+import DeepHarnessView from "./DeepHarnessView";
 import LogoMark from "./Logo";
 import PersonaMenu from "./PersonaMenu";
 import { SparkIcon } from "./Icons";
 
 /**
- * 当前聊天界面所属的 Agent。阶段 3 引入 Agent 隔离层后，
- * 这里会改为按选中的 Agent 动态切换。
- */
-const CURRENT_AGENT: AgentId = "deepseek-harness";
-
-/**
- * Agent 工具集。注意：出于安全设计，这里不再提供任何命令执行能力；
- * 文件操作全部经由 Rust 权限层（白名单校验）完成。
+ * 当前 Agent 的工具集。注意：出于安全设计，这里不再提供任何命令执行能力；
+ * 文件操作全部经由 Rust 权限层（每 Agent 独立白名单）完成。
  */
 const AGENT_TOOLS = [
   {
@@ -80,6 +76,7 @@ export default function ChatArea() {
   const conv = useAppStore((s) => s.activeConversation());
   const tools = useAppStore((s) => s.tools);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
+  const activeAgent = useAppStore((s) => s.activeAgent);
 
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -99,6 +96,7 @@ export default function ChatArea() {
   };
 
   const send = async (text: string) => {
+    const agent: AgentId = useAppStore.getState().activeAgent;
     const st = useAppStore.getState();
     let active = st.activeConversation();
     let convId = active?.id;
@@ -175,13 +173,13 @@ export default function ChatArea() {
           try {
             const args = JSON.parse(tc.args || "{}");
             if (tc.name === "list_dir") {
-              const r = await listDir(CURRENT_AGENT, String(args.path || "."));
+              const r = await listDir(agent, String(args.path || "."));
               result = r.map((f) => `${f.isDir ? "[dir] " : ""}${f.name}${f.isDir ? "" : ` (${f.size} B)`}`).join("\n");
             } else if (tc.name === "read_file") {
-              result = await readTextFile(CURRENT_AGENT, String(args.path || ""));
+              result = await readTextFile(agent, String(args.path || ""));
             } else if (tc.name === "write_file") {
               const written = await writeTextFile(
-                CURRENT_AGENT,
+                agent,
                 String(args.path || ""),
                 typeof args.content === "string" ? args.content : String(args.content ?? "")
               );
@@ -245,6 +243,11 @@ export default function ChatArea() {
 
   const stop = () => abortRef.current?.abort();
 
+  // 任务型 Agent 不走对话形态：整块主视图交给任务控制台。
+  if (AGENT_META[activeAgent].hasTaskConsole) {
+    return <DeepHarnessView />;
+  }
+
   const empty = !conv || conv.messages.length === 0;
 
   return (
@@ -274,7 +277,9 @@ export default function ChatArea() {
           <div className="logo-float"><LogoMark size={64} radius={18} /></div>
           <div>
             <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text)" }}>开始一段新的对话</div>
-            <div style={{ fontSize: 13, marginTop: 6 }}>星核 StarCore · 选择模型后即可开始</div>
+            <div style={{ fontSize: 13, marginTop: 6 }}>
+              {AGENT_META[activeAgent].name} · {AGENT_META[activeAgent].tagline}
+            </div>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, maxWidth: 500, width: "100%" }}>
             {SUGGESTIONS.map((s) => (

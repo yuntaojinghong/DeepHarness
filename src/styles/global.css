@@ -1026,3 +1026,408 @@ textarea:focus {
   border-radius: 7px;
   color: var(--text-secondary);
 }
+
+/* ===== Agent 切换器（侧栏顶部） ===== */
+.agent-switcher {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+  flex-shrink: 0;
+}
+
+.agent-card {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: calc(100% - 16px);
+  margin: 1px 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  text-align: left;
+  color: var(--text-secondary);
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+.agent-card:hover {
+  background: var(--bg-secondary);
+  color: var(--text);
+  transform: translateX(2px);
+}
+.agent-card.active {
+  background: var(--primary-weak);
+  color: var(--primary);
+}
+.agent-card-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-card-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+}
+.agent-card.active .agent-card-sub {
+  color: var(--primary);
+  opacity: 0.75;
+}
+.agent-card-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--primary-weak-2);
+  color: var(--primary);
+}
+.agent-switcher-error {
+  margin: 4px 12px 0;
+  font-size: 11px;
+  color: var(--danger);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+  user-select: none;
+}
+
+.dh-sidebar-note {
+  padding: 12px 14px;
+  margin: 4px 8px 10px;
+  border-radius: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.75;
+}
+.dh-sidebar-note p {
+  margin-top: 8px;
+}
+
+.titlebar-error {
+  max-width: 220px;
+  font-size: 11.5px;
+  color: var(--danger);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== DeepHarness 任务控制台 ===== */
+.dh-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 4%;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.dh-agent-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.dh-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 6% 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dh-goal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-soft);
+}
+.dh-goal-input {
+  resize: vertical;
+  min-height: 68px;
+  line-height: 1.7;
+  padding: 10px 12px;
+}
+.dh-goal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+.dh-goal-hint {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.6;
+}
+
+.dh-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.6;
+  border: 1px solid transparent;
+}
+.dh-alert-error {
+  background: var(--danger-weak);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.dh-alert-info {
+  background: var(--primary-weak);
+  border-color: var(--primary-weak-2);
+  color: var(--primary);
+}
+
+.dh-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  color: var(--text-tertiary);
+  padding: 36px 20px;
+}
+
+.dh-summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-soft);
+}
+.dh-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dh-summary-goal {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.dh-summary-text {
+  margin-top: 10px;
+  font-size: 13.5px;
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.dh-pill.ok {
+  background: var(--success-weak);
+  color: var(--success);
+}
+.dh-pill.err {
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+.dh-pill.warn {
+  background: var(--warning-weak);
+  color: var(--warning);
+}
+.dh-pill.info {
+  background: var(--primary-weak);
+  color: var(--primary);
+}
+.dh-pill.tool {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  background: var(--primary-weak);
+  color: var(--primary);
+}
+.dh-pill.answer {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.dh-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dh-step {
+  display: flex;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow-soft);
+}
+.dh-step.failed {
+  border-color: var(--danger);
+}
+.dh-step-marker {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.dh-step.failed .dh-step-marker {
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+.dh-step-body {
+  flex: 1;
+  min-width: 0;
+}
+.dh-step-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dh-step-title {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+.dh-step-line {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.dh-step-line.warn {
+  color: var(--warning);
+}
+.dh-details {
+  margin-top: 8px;
+}
+.dh-details summary {
+  font-size: 12px;
+  color: var(--primary);
+  cursor: pointer;
+  user-select: none;
+}
+.dh-details pre {
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* ===== DeepHarness 右侧面板 ===== */
+.dh-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  padding: 5px 0;
+}
+.dh-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.dh-field input[type="range"] {
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+.dh-field .form-input {
+  font-size: 12.5px;
+  padding: 6px 10px;
+}
+.dh-search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  color: var(--text-tertiary);
+}
+.dh-hint-plain {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.dh-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+.dh-memory-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  padding: 8px 10px;
+}
+.dh-memory-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dh-memory-importance {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.dh-memory-content {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.dh-memory-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.dh-tag {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+}

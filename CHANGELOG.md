@@ -18,8 +18,17 @@
   - Worker 协议扩展：`configure`（注入模型参数与 Agent 目录）、`plan`、`run_task` 及全部记忆操作，未配置请求返回明确错误。
   - 主进程 IPC 命令层：`deepharness_configure` / `deepharness_get_config`（apiKey 打码）/ `deepharness_status` / `deepharness_run_task` / `deepharness_plan` / `deepharness_remember` / `deepharness_recall` / `deepharness_forget` / `deepharness_memory_stats`；模型配置持久化至 Agent 隔离目录（`config/agent_config.json`，不回显 Key），Worker 启动时自动注入已保存配置，未运行时命令自动拉起 Worker；注册表改为 `Arc` 持有并新增 `NativeAgentHandle` 托管状态，长任务不阻塞注册表全局锁。
 - **跨模块集成测试**（`src-tauri/tests/public_api.rs`）：只经由 `deepharness_lib::…` 公开接口访问，校验规划器↔工具注册表、`AccessMode` 与 serde 名、记忆类型、反思 JSON 的 camelCase、配置持久化与三 Agent 目录隔离等跨模块契约。
+- **阶段 4 · 前端三 Agent 主界面与 DeepHarness 任务控制台**：
+  - 自研 React 界面成为唯一主界面：左侧 Agent 切换 + 会话列表，中间对话 / 任务视图，右侧上下文面板；官方 Web UI 降级为标题栏的「在浏览器中打开」可选按钮（仅在 Harness 运行时可用）。
+  - 新增 Agent 契约层 `src/lib/deepharness.ts`：统一封装 `agent_list` / `agent_start` / `agent_stop` / `agent_status` 与 9 个 `deepharness_*` 命令，含 Agent 元信息、状态文案与浏览器预览降级，所有类型与 Rust 侧 camelCase 序列化一一对应。
+  - 会话按 Agent 隔离：`Conversation` 新增 `agent` 字段（历史数据读取时统一兜底），切换 Agent 时会话列表、主视图与右侧面板整体切换，不跨 Agent 泄漏内容。
+  - DeepHarness 任务控制台：目标输入 → 「生成计划」预览结构化步骤 → 「执行任务」展示逐步执行时间线（工具、结果、反思建议、重试与步骤修订标注）→ 任务总结；未启动 Worker 或未配置模型时给出明确引导而非静默失败。
+  - DeepHarness 右侧面板：Worker 就绪状态（进程号、协议版本、崩溃原因）与启停、模型配置表单（落盘 + 热注入，API Key 只回显尾号，支持一键沿用对话侧已填密钥）、长期记忆库（统计 / 关键词检索 / 手动写入 / 单条删除）。
+  - 前端单元测试：新增 `src/lib/deepharness.test.ts` 与 `src/lib/storage.test.ts`（29 个用例，覆盖状态映射、错误归一化、截断与序列化辅助、会话字段兜底、模型去重、浏览器预览降级）。
 
 ### Changed
+- **启动流程不再跳转官方 Web UI**：移除启动时 `window.location.href = "http://127.0.0.1:3080"` 与已不存在的 `start_dsh` 命令调用（该命令早已在重构中删除，此前会使每次启动都落到「启动失败」分支）。现在启动只做本机环境检测与 Agent 概览读取，失败也不阻塞进入界面，保证零配置用户直接可用。
+- **前端 CI 增加单元测试步骤**（`npm test`），与类型检查、构建并列。
 - Windows 构建链补齐：MSYS2 侧补装 mingw-w64 头文件与 winpthreads（rusqlite bundled 编译 SQLite 所需）；Rust 链接统一启用 `link-self-contained`。
 - **Windows 应用清单改由 `build.rs` 统一注入**：关闭 tauri-build 的默认清单（`WindowsAttributes::new_without_app_manifest`），改由 `build.rs` 对所有链接目标追加同一份 `windows-app.manifest`。此前 tauri-build 只给 bin 目标嵌清单（内部走 `embed-resource` 的 `rustc-link-arg-bins`），`cargo test` 产出的可执行文件完全没有清单，导致 tao 静态导入的 `comctl32!TaskDialogIndirect`（仅 Common-Controls v6 导出）解析失败、测试在加载期以 `0xc0000139` 整体退出。现在 MSVC 走 `/MANIFEST:EMBED` + `/MANIFESTINPUT`，GNU 走 windres 资源对象，bin 与测试目标共用唯一一份清单来源。
 - CI：测试步骤改为 `cargo test --lib` + `cargo test --test public_api`；仅编译不运行的那一步改用 `--message-format=json` 把 cargo 实际产出的测试可执行文件路径写盘，避免被 Cargo 缓存还原回来的历史产物干扰；原先的「导入表诊断」替换为**应用清单校验**（直接解析 exe 的 `RT_MANIFEST` 资源并断言含 Common-Controls v6），由 `continue-on-error` 的哨兵升级为硬性失败，故障信息也从「没有上下文的退出码」变成明确的原因。
@@ -28,6 +37,7 @@
 - **非空目录递归删除在工作区内被误拒**：`native/tools.rs` 与 `fs_ops.rs` 都用未规范化的 `dirs.workspace` 去 `Path::strip_prefix` 一个已规范化的绝对路径，Windows 上因 `\\?\` 前缀 / 短名 / 大小写差异必然失配，导致工作区内的非空目录也无法递归删除。现统一改用新增的 `permissions::is_within`（两侧先规范化 + 大小写不敏感的前缀+分隔符匹配），并补了回归测试。
 - **Worker 未配置时的报错不指向根因**：`plan` / `run_task` / `remember` / `recall` / `forget` 都先校验请求载荷、后检查配置，未配置时返回的是「缺少 goal」这类字段错误。现改为配置类前置条件优先，报错明确提示先 `configure`。
 - **`agent_config` 单测相互踩踏**：测试目录按进程 id 复用，并行执行时写损坏 JSON 的用例会让读回用例拿到 `None` 而随机失败。改为每个用例独立临时目录。
+- **CI 的 Windows Python 步骤因中文输出失败**：runner 上 Python 的 stdout 默认按 cp1252（charmap）编码，`shell: python` 步骤里任何中文 print 都会抛 `UnicodeEncodeError` 并把步骤判为失败——应用清单校验因此在「已经校验完第一个二进制、正要打印成功提示」时中断。现于 job 级设置 `PYTHONUTF8` / `PYTHONIOENCODING`，并在两个内联脚本里显式 `reconfigure` stdout/stderr，使步骤不再依赖 runner 语言环境。
 
 ## [1.0.0-alpha.1] - 2026-09-12
 
