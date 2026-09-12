@@ -20,3 +20,14 @@ StarCore_*.exe
 StarCore-*.zip
 DeepSeek *.exe
 deepseek-logo.png
+
+# 密钥与环境变量严禁入库
+.env
+.env.*
+*.pem
+*.key
+# 本地数据库与临时文件
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3

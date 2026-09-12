@@ -26,7 +26,7 @@ export default function App() {
 
   const [booting, setBooting] = useState(true);
   const [leaving, setLeaving] = useState(false);
-  const [bootStatus, setBootStatus] = useState("正在启动 DeepSeek Harness 服务…");
+  const [bootStatus, setBootStatus] = useState("正在启动 DeepHarness…");
   const [bootError, setBootError] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{ version: string; url: string } | null>(null);
 
@@ -75,7 +75,7 @@ export default function App() {
     (async () => {
       try {
         const { invoke } = await import("@tauri-apps/api/core");
-        setBootStatus("正在启动 DeepSeek Harness 服务…");
+        setBootStatus("正在启动 DeepHarness 服务…");
         await invoke("start_dsh");
         if (cancelled) return;
         setBootStatus("服务已就绪，正在进入…");

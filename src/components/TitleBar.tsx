@@ -39,7 +39,7 @@ export default function TitleBar() {
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <LogoMark size={30} />
         <span style={{ fontSize: 14.5, fontWeight: 600, letterSpacing: 0.2 }}>
-          DeepSeek Harness
+          DeepHarness
         </span>
       </div>
 

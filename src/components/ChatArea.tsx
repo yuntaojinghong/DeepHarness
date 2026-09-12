@@ -52,11 +52,8 @@ const SUGGESTIONS = [
 
 export default function ChatArea() {
   const conv = useAppStore((s) => s.activeConversation());
-  const models = useAppStore((s) => s.models);
-  const settings = useAppStore((s) => s.settings);
   const tools = useAppStore((s) => s.tools);
   const setSettingsOpen = useAppStore((s) => s.setSettingsOpen);
-  const newConversation = useAppStore((s) => s.newConversation);
 
   const [streaming, setStreaming] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -84,6 +81,11 @@ export default function ChatArea() {
       active = useAppStore.getState().activeConversation();
     }
     const model = st.models.find((m) => m.id === active!.modelId) ?? st.models[0];
+    if (!model) {
+      st.setSettingsOpen(true);
+      alert("尚未配置任何模型，请先在设置中添加。");
+      return;
+    }
     const apiKey = st.settings.apiKeys[model.provider] || st.settings.apiKeys["deepseek"];
     if (!apiKey) {
       st.setSettingsOpen(true);
@@ -141,6 +143,7 @@ export default function ChatArea() {
         const records: ToolCallRecord[] = [];
         for (let i = 0; i < toolCalls.length; i++) {
           const tc = toolCalls[i];
+          if (!tc) continue;
           let result = "";
           let ok = true;
           try {
@@ -183,7 +186,7 @@ export default function ChatArea() {
       }
 
       patchAsst(convId, asstMsg.id, (m) => ({ ...m, streaming: false }));
-      notify("星核 StarCore", "已生成回复");
+      notify("DeepHarness", "已生成回复");
     } catch (e) {
       if (!abort.signal.aborted) {
         const errMsg = e instanceof Error ? e.message : String(e);

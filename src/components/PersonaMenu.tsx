@@ -10,6 +10,7 @@ export default function PersonaMenu() {
   const ref = useRef<HTMLDivElement>(null);
 
   const current = PERSONAS.find((p) => p.id === conv?.systemPromptId) ?? PERSONAS[0];
+  if (!current) return null;
 
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {

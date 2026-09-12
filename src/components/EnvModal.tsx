@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "../store";
-import type { EnvStatus } from "../types";
 import { checkEnv, isTauri } from "../lib/env";
 import { CloseIcon, CheckIcon, CpuIcon, PythonIcon, NodeIcon, GitIcon } from "./Icons";
 

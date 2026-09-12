@@ -21,8 +21,8 @@ export default function SplashScreen({ leaving, status, error, onRetry }: Props)
           </div>
         </div>
         <div className="splash-brand">
-          <span className="splash-title">星核 StarCore</span>
-          <span className="splash-sub">DeepSeek Harness · AI 桌面工作台</span>
+          <span className="splash-title">DeepHarness</span>
+          <span className="splash-sub">零配置的 AI Agent 桌面工作台</span>
         </div>
         <div className="splash-status">
           {error ? (

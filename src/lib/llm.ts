@@ -24,9 +24,9 @@ export async function streamChat(opts: StreamOptions): Promise<void> {
     messages: opts.messages,
     stream: true,
   };
-  if (opts.temperature !== undefined) body.temperature = opts.temperature;
-  if (opts.maxTokens !== undefined) body.max_tokens = opts.maxTokens;
-  if (opts.tools && opts.tools.length) body.tools = opts.tools;
+  if (opts.temperature !== undefined) body["temperature"] = opts.temperature;
+  if (opts.maxTokens !== undefined) body["max_tokens"] = opts.maxTokens;
+  if (opts.tools && opts.tools.length) body["tools"] = opts.tools;
 
   const res = await fetch(url, {
     method: "POST",
@@ -53,7 +53,10 @@ export async function streamChat(opts: StreamOptions): Promise<void> {
   const flushTools = () => {
     const keys = Object.keys(collectedToolCalls).sort((a, b) => Number(a) - Number(b));
     if (keys.length) {
-      opts.onToolCallStart?.(keys.map((k) => collectedToolCalls[Number(k)]));
+      const calls = keys
+        .map((k) => collectedToolCalls[Number(k)])
+        .filter((c): c is ToolCallChunk => c !== undefined);
+      opts.onToolCallStart?.(calls);
     }
   };
 

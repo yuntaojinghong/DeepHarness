@@ -1,61 +1,62 @@
 :root {
-  --bg: #f1f5fc;
-  --bg-secondary: #e8edf8;
+  /* DeepHarness 品牌色：钢蓝 → 青瓷，整体克制，无霓虹 */
+  --bg: #f3f5f9;
+  --bg-secondary: #e9edf4;
   --surface: #ffffff;
-  --border: #dfe6f2;
-  --border-strong: #c8d3e8;
-  --text: #141a2a;
-  --text-secondary: #4f5b73;
-  --text-tertiary: #8b96ad;
-  --primary: #0ea5e9;
-  --primary-strong: #0284c7;
-  --primary-weak: #e4f3fe;
-  --primary-weak-2: #d3ecfd;
-  --accent: #22d3ee;
-  --grad-primary: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
-  --glow: 0 0 14px rgba(14, 165, 233, 0.45);
+  --border: #dfe4ee;
+  --border-strong: #c6cfdc;
+  --text: #171d2b;
+  --text-secondary: #4d5871;
+  --text-tertiary: #8a94aa;
+  --primary: #5b8def;
+  --primary-strong: #4073d6;
+  --primary-weak: #e9f0fe;
+  --primary-weak-2: #d9e6fd;
+  --accent: #4fb3a9;
+  --grad-primary: linear-gradient(135deg, #6e9bff 0%, #63c7be 100%);
+  --glow: 0 0 14px rgba(110, 155, 255, 0.4);
   --success: #1f9d61;
   --success-weak: #e4f6ee;
   --warning: #d97706;
   --warning-weak: #fdf3e3;
   --danger: #e05252;
   --danger-weak: #fdecec;
-  --info: #0ea5e9;
-  --info-weak: #e4f3fe;
+  --info: #5b8def;
+  --info-weak: #e9f0fe;
   --radius: 14px;
   --radius-sm: 9px;
-  --shadow-pop: 0 12px 32px rgba(20, 40, 90, 0.16);
-  --shadow-soft: 0 4px 16px rgba(20, 40, 90, 0.07);
-  --shadow-hover: 0 10px 28px rgba(14, 165, 233, 0.22);
+  --shadow-pop: 0 12px 32px rgba(23, 29, 43, 0.16);
+  --shadow-soft: 0 4px 16px rgba(23, 29, 43, 0.07);
+  --shadow-hover: 0 10px 28px rgba(91, 141, 239, 0.2);
 }
 
 [data-theme="dark"] {
-  --bg: #070b16;
-  --bg-secondary: #0d1322;
-  --surface: #111a2e;
-  --border: #1e2942;
-  --border-strong: #2c3a5c;
-  --text: #e6ecff;
-  --text-secondary: #a3aecb;
-  --text-tertiary: #5f6d8f;
-  --primary: #22d3ee;
-  --primary-strong: #67e8f9;
-  --primary-weak: rgba(34, 211, 238, 0.14);
-  --primary-weak-2: rgba(34, 211, 238, 0.22);
-  --accent: #38bdf8;
-  --grad-primary: linear-gradient(135deg, #22d3ee 0%, #6366f1 100%);
-  --glow: 0 0 18px rgba(34, 211, 238, 0.5);
+  --bg: #12161f;
+  --bg-secondary: #181d29;
+  --surface: #1c2230;
+  --border: #2a3143;
+  --border-strong: #3b4459;
+  --text: #e7ebf5;
+  --text-secondary: #a6aec4;
+  --text-tertiary: #626d88;
+  --primary: #6e9bff;
+  --primary-strong: #8fb2ff;
+  --primary-weak: rgba(110, 155, 255, 0.14);
+  --primary-weak-2: rgba(110, 155, 255, 0.22);
+  --accent: #63c7be;
+  --grad-primary: linear-gradient(135deg, #6e9bff 0%, #63c7be 100%);
+  --glow: 0 0 18px rgba(110, 155, 255, 0.42);
   --success: #2eaf75;
   --success-weak: #16352a;
   --warning: #e8a13d;
   --warning-weak: #3a2c14;
   --danger: #ee6b6b;
   --danger-weak: #3d2020;
-  --info: #22d3ee;
-  --info-weak: rgba(34, 211, 238, 0.14);
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.55);
-  --shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.35);
-  --shadow-hover: 0 10px 28px rgba(34, 211, 238, 0.28);
+  --info: #6e9bff;
+  --info-weak: rgba(110, 155, 255, 0.14);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.32);
+  --shadow-hover: 0 10px 28px rgba(110, 155, 255, 0.26);
 }
 
 * {
@@ -78,6 +79,11 @@ body {
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   transition: background 0.3s ease, color 0.3s ease;
+}
+
+/* Tauri 窗口启用 Mica 云母材质时，网页背景透明让系统材质透出 */
+html.mica body {
+  background: transparent;
 }
 
 ::-webkit-scrollbar {
@@ -875,14 +881,27 @@ textarea:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: logoPulse 2.4s ease-in-out infinite;
+  /* 启动动画：Logo 从模糊到清晰浮现（约 1.8s），伴随轻微缩放与光晕；不阻塞应用初始化 */
+  animation: logoReveal 1.8s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .splash-logo svg {
-  filter: drop-shadow(0 0 16px rgba(56, 189, 248, 0.55));
+  filter: drop-shadow(0 0 18px rgba(110, 155, 255, 0.5));
 }
-@keyframes logoPulse {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 14px rgba(56, 189, 248, 0.5)); }
-  50% { transform: scale(1.06); filter: drop-shadow(0 0 26px rgba(56, 189, 248, 0.85)); }
+@keyframes logoReveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.9);
+    filter: blur(22px);
+  }
+  60% {
+    opacity: 1;
+    filter: blur(4px) drop-shadow(0 0 24px rgba(110, 155, 255, 0.55));
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0) drop-shadow(0 0 16px rgba(110, 155, 255, 0.45));
+  }
 }
 
 .splash-brand {
