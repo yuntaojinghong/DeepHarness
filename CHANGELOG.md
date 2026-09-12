@@ -13,6 +13,10 @@
 - 前端契约层新增 `agentOpenWebUi()`（`src/lib/deepharness.ts`），并补了「浏览器预览下必须明确拒绝而非静默打开 401 页面」的测试。
 - **「支持作者」入口**（标题栏爱心按钮 → `SupportModal`）：一个弹窗收纳两种支持方式 ——「去点 Star」（跳转仓库主页）与「请作者喝杯咖啡」（微信赞赏码，直接可扫）。赞赏码由原图裁出纯二维码面板后按最近邻放大（`src/assets/support-qrcode.png`，860×860），避免把原图里的浅色边框与色条带进深色主题；图片底色固定为白（不能用主题变量，否则会压掉码的对比度导致识别失败）。链接与作者署名集中在 `src/lib/links.ts`，含 9 个单元测试（其中一项与 Rust 侧白名单做**跨层契约校验**，防止两端各自放宽后悄悄偏离）。
 - **`open_url` 模块扩展公网白名单**：新增 `open_external_url` 命令，允许 `https://github.com` 与 `https://platform.deepseek.com` 及其子域（仅 https、host 精确匹配或 `.` 后缀，`https://github.com.evil.com` 与 `https://evilgithub.com` 均被拒），并补 6 个测试。前端原先用 `<a target="_blank">` / `window.open` 打开 GitHub 与更新下载页，在 Tauri WebView 下可能被 WebView 自己接管（替换应用界面）或直接无效；现统一走后端交给系统浏览器。
+- **Windows 安装包打包流水线**：CI 新增 `package` job，在 `windows-latest` 上用 `cargo tauri build` 产出 NSIS 安装程序并上传为产物，产物缺失时步骤直接失败（而非告警）——「CI 全绿却没有安装包」是最需要防住的结果。该 job 与前端、Rust 两个 job **并行**：release 编译复用了不了 debug 的 target 目录，串行只会把两者的耗时叠加到关键路径上。缓存单独用 `cargo-release-*` 键，因为 `target/release` 与 `target/debug` 的产物不通用，共用一个键会让两边都命中不了。
+- **安装包内嵌随包资源**（`bundle.resources` → `../resources/**/*`）：Node 便携版与 dsh 依赖树由 `setup-resources.sh` 在打包前生成并打进安装程序，干净机器装完即可用 Harness Agent，不必再单独下载。代价是体积：`node.exe` 单文件约 70MB，安装包最终 **55MB**，超出原定 ≤30MB 的预算——这是明确取舍后的结果（零配置优先于体积预算）。
+- **`resources/README.md` 占位文件**：`tauri-build` 在**编译期**就会展开 `bundle.resources` 的 glob 并校验，目录完全不存在会让 `cargo check` / `cargo test` / `cargo tauri build` 全部失败。占位文件保证 glob 至少匹配一项，使**没有资源的环境也能正常编译**（新克隆的仓库、只跑测试的 Rust job），并就地记录了这个约束。
+- **release 体积优化**（`[profile.release]`）：`opt-level = "z"` + `lto = "thin"` + `strip = true`。默认 release 配置会保留符号表与调试信息，二进制远大于必要体积；thin LTO 的编译耗时接近默认，仍能裁掉未被引用的代码。
 - **阶段 4 · DeepHarness Native Agent 核心**：
   - 模型提供方抽象（`ModelProvider` trait）+ DeepSeek Chat Completions 实现，HTTP 走 Windows 原生 WinHTTP（系统 SChannel TLS，零新增编译负担）；
   - 多步规划器：目标 → 结构化 JSON 计划（工具步骤 / 纯回答步骤），非法输出带错误反馈自动重试一次，步骤数上限防失控；
