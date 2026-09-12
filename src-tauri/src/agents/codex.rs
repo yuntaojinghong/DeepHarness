@@ -108,13 +108,6 @@ impl CodexRuntime {
         }
     }
 
-    fn emit(&self, chunk: &CodexOutputChunk) {
-        if let Some(app) = &self.event_sink {
-            use tauri::Emitter;
-            let _ = app.emit("agent://codex/output", chunk);
-        }
-    }
-
     /// 提交一个任务给 Codex（`codex exec`），立即返回；输出走日志与事件流。
     pub fn submit_task(&self, prompt: &str) -> AppResult<u64> {
         let mut inner = self.inner.lock().unwrap();
@@ -160,17 +153,14 @@ impl CodexRuntime {
             std::thread::spawn(move || {
                 let reader = BufReader::new(out);
                 for line in reader.lines().map_while(Result::ok) {
-                    if let Some(app) = &sink {
-                        use tauri::Emitter;
-                        let _ = app.emit(
-                            "agent://codex/output",
-                            CodexOutputChunk {
-                                agent: agent_id.to_string(),
-                                session_seq: seq,
-                                text: format!("{line}\n"),
-                            },
-                        );
-                    }
+                    emit_output(
+                        &sink,
+                        &CodexOutputChunk {
+                            agent: agent_id.to_string(),
+                            session_seq: seq,
+                            text: format!("{line}\n"),
+                        },
+                    );
                     append_line(&log_path, &line);
                 }
             });
@@ -288,6 +278,16 @@ impl crate::agents::AgentRuntime for CodexRuntime {
 
     fn dirs(&self) -> &AgentDirs {
         &self.dirs
+    }
+}
+
+/// 向事件流推送一条 Codex 输出（无事件接收端时静默跳过）。
+///
+/// 作为自由函数提供给 stdout 泵线程使用：线程闭包不持有 `self`。
+fn emit_output(sink: &Option<tauri::AppHandle>, chunk: &CodexOutputChunk) {
+    if let Some(app) = sink {
+        use tauri::Emitter;
+        let _ = app.emit("agent://codex/output", chunk);
     }
 }
 

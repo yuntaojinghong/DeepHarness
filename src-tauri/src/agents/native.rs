@@ -11,6 +11,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -26,13 +27,29 @@ const WORKER_MEMORY_LIMIT_BYTES: usize = 1_000 * 1024 * 1024;
 /// shutdown 超时：强杀前的宽限时间。
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
-/// 单次请求-响应的超时。
+/// 控制类请求（ping / status / configure / 记忆操作）的响应超时。
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 长任务请求（plan / run_task）的响应超时：模型多轮往返可能耗时数分钟。
+const LONG_REQUEST_TIMEOUT: Duration = Duration::from_secs(900);
+
+/// 协议错乱时最多丢弃多少条陈旧响应（超时后迟到的回执）。
+const MAX_STALE_RESPONSES: usize = 8;
+
+/// 按请求类型选择响应超时。
+fn timeout_for(kind: &str) -> Duration {
+    match kind {
+        "plan" | "run_task" => LONG_REQUEST_TIMEOUT,
+        _ => REQUEST_TIMEOUT,
+    }
+}
 
 struct NativeInner {
     child: Option<Child>,
     stdin: Option<std::process::ChildStdin>,
-    stdout: Option<BufReader<std::process::ChildStdout>>,
+    /// Worker 的 stdout 由独立读取线程泵入此通道，请求方按类型超时接收，
+    /// 避免 Worker 卡死时主进程（乃至 UI）被无限期阻塞。
+    lines: Option<Receiver<String>>,
     last_error: Option<String>,
 }
 
@@ -58,7 +75,7 @@ impl NativeAgentRuntime {
             inner: Mutex::new(NativeInner {
                 child: None,
                 stdin: None,
-                stdout: None,
+                lines: None,
                 last_error: None,
             }),
         }
@@ -88,54 +105,113 @@ impl NativeAgentRuntime {
         }
 
         let stdin = child.stdin.take();
-        let stdout = child.stdout.take().map(BufReader::new);
+        let stdout = child.stdout.take();
+        // 独立读取线程：Worker 的 stdout 逐行泵入通道，主线程按超时接收。
+        // 线程随管道 EOF（Worker 退出）自然结束，不泄漏。
+        let lines = stdout.map(|out| {
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            let spawned = std::thread::Builder::new()
+                .name("deepharness-worker-reader".to_string())
+                .spawn(move || {
+                    let mut reader = BufReader::new(out);
+                    loop {
+                        let mut line = String::new();
+                        match reader.read_line(&mut line) {
+                            Ok(0) | Err(_) => break, // EOF / 管道错误：Worker 已退出
+                            Ok(_) => {
+                                if tx.send(line).is_err() {
+                                    break; // 接收端已被丢弃（运行时回收）
+                                }
+                            }
+                        }
+                    }
+                });
+            if let Err(e) = spawned {
+                tracing::error!(error = %e, "启动 Worker 读取线程失败");
+            }
+            rx
+        });
 
         let mut inner = self.inner.lock().unwrap();
         inner.child = Some(child);
         inner.stdin = stdin;
-        inner.stdout = stdout;
+        inner.lines = lines;
         Ok(())
     }
 
-    /// 发送请求并等待响应（同步 request-reply）。
+    /// 发送请求并等待响应（同步 request-reply，带按类型超时）。
+    ///
+    /// 超时/管道断开都会返回明确错误并记录 `last_error`，绝不无限阻塞；
+    /// 超时后迟到的陈旧响应会在后续请求中被识别并丢弃（最多
+    /// `MAX_STALE_RESPONSES` 条，超出即判定协议错乱）。
     pub fn request(&self, kind: &str, payload: serde_json::Value) -> AppResult<serde_json::Value> {
         let mut inner = self.inner.lock().unwrap();
-        let NativeInner { stdin, stdout, .. } = &mut *inner;
-        let (stdin, stdout) = match (stdin, stdout) {
-            (Some(si), Some(so)) => (si, so),
-            _ => return Err(AppError::Other("DeepHarness Worker 未运行".to_string())),
-        };
-
         let id = uuid::Uuid::new_v4().to_string();
-        let req = worker::WorkerRequest {
-            id: id.clone(),
-            kind: kind.to_string(),
-            payload,
-        };
-        let mut req_line = serde_json::to_string(&req)
-            .map_err(|e| E::Other(format!("请求序列化失败: {e}")))?;
-        req_line.push('\n');
-        writeln!(stdin, "{req_line}")
-            .map_err(|e| E::Other(format!("向 Worker 写入请求失败: {e}")))?;
-        stdin.flush().ok();
+        let timeout = timeout_for(kind);
 
-        // 读一行响应（简化超时：Worker 对所有请求都立即响应；
-        // 若 Worker 死亡，read_line 返回 0 → 视为崩溃）
-        let mut response_line = String::new();
-        let n = stdout
-            .read_line(&mut response_line)
-            .map_err(|e| E::Other(format!("读取 Worker 响应失败: {e}")))?;
-        if n == 0 {
-            // 注意：此处 stdout 仍处于可变借用中，不能写 inner.last_error
-            return Err(AppError::Other(
-                "DeepHarness Worker 已崩溃，请重启该 Agent".to_string(),
-            ));
+        // 写入请求（借用范围独立，后续才能写 last_error）
+        {
+            let stdin = match inner.stdin.as_mut() {
+                Some(si) => si,
+                None => return Err(AppError::Other("DeepHarness Worker 未运行".to_string())),
+            };
+            let req = worker::WorkerRequest {
+                id: id.clone(),
+                kind: kind.to_string(),
+                payload,
+            };
+            let mut req_line = serde_json::to_string(&req)
+                .map_err(|e| E::Other(format!("请求序列化失败: {e}")))?;
+            req_line.push('\n');
+            writeln!(stdin, "{req_line}")
+                .map_err(|e| E::Other(format!("向 Worker 写入请求失败: {e}")))?;
+            stdin.flush().ok();
         }
+
+        // 按超时接收响应，跳过不属于本次请求的陈旧回执
+        let mut response_line: Option<String> = None;
+        for _ in 0..MAX_STALE_RESPONSES {
+            let received = {
+                let lines = match inner.lines.as_ref() {
+                    Some(rx) => rx,
+                    None => return Err(AppError::Other("DeepHarness Worker 未运行".to_string())),
+                };
+                lines.recv_timeout(timeout)
+            };
+            match received {
+                Ok(line) => {
+                    // 无 id 或 id 不匹配：视为上一条超时请求的迟到回执，丢弃
+                    let matched = serde_json::from_str::<worker::WorkerResponse>(line.trim())
+                        .map(|r| r.id == id)
+                        .unwrap_or(false);
+                    if matched {
+                        response_line = Some(line);
+                        break;
+                    }
+                    tracing::warn!(kind, "丢弃与当前请求不匹配的 Worker 响应");
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    let msg = format!(
+                        "DeepHarness Worker 响应超时（{kind} 超过 {} 秒未返回），请检查网络或重启该 Agent",
+                        timeout.as_secs()
+                    );
+                    inner.last_error = Some(msg.clone());
+                    return Err(AppError::Other(msg));
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    let msg = "DeepHarness Worker 已崩溃（管道断开），请重启该 Agent".to_string();
+                    inner.last_error = Some(msg.clone());
+                    return Err(AppError::Other(msg));
+                }
+            }
+        }
+        let response_line = response_line.ok_or_else(|| {
+            AppError::Other("Worker 连续返回不匹配的响应（协议错乱），请重启该 Agent".to_string())
+        })?;
+
         let resp: worker::WorkerResponse = serde_json::from_str(response_line.trim())
             .map_err(|e| E::Other(format!("Worker 响应解析失败: {e}")))?;
-        if resp.id != id {
-            return Err(AppError::Other("Worker 响应 id 不匹配（协议错乱）".to_string()));
-        }
+        debug_assert_eq!(resp.id, id, "响应 id 已在接收阶段校验");
         if !resp.ok {
             let msg = resp.payload["message"]
                 .as_str()
@@ -233,21 +309,22 @@ impl crate::agents::AgentRuntime for NativeAgentRuntime {
 
     fn stop(&self) -> AppResult<()> {
         let mut inner = self.inner.lock().unwrap();
-        // 1) 礼貌请求 shutdown
-        let NativeInner { stdin, stdout, .. } = &mut *inner;
-        if let (Some(stdin), Some(stdout)) = (stdin, stdout) {
-            let req = worker::WorkerRequest {
-                id: "shutdown".to_string(),
-                kind: "shutdown".to_string(),
-                payload: serde_json::Value::Null,
-            };
-            if writeln!(stdin, "{}", serde_json::to_string(&req).unwrap()).is_ok() {
-                stdin.flush().ok();
-                let mut line = String::new();
-                let deadline = std::time::Instant::now() + SHUTDOWN_GRACE;
-                // 阻塞读一行（Worker 会立即响应后退出）
-                let _ = stdout.read_line(&mut line);
-                debug_assert!(std::time::Instant::now() <= deadline + SHUTDOWN_GRACE);
+        // 1) 礼貌请求 shutdown（等回执，最宽限 SHUTDOWN_GRACE）
+        {
+            let guard = &mut *inner;
+            let stdin = guard.stdin.as_mut();
+            let lines = guard.lines.as_ref();
+            if let (Some(stdin), Some(lines)) = (stdin, lines) {
+                let req = worker::WorkerRequest {
+                    id: "shutdown".to_string(),
+                    kind: "shutdown".to_string(),
+                    payload: serde_json::Value::Null,
+                };
+                if writeln!(stdin, "{}", serde_json::to_string(&req).unwrap()).is_ok() {
+                    stdin.flush().ok();
+                    // Worker 会立即响应 goodbye 后自行退出
+                    let _ = lines.recv_timeout(SHUTDOWN_GRACE);
+                }
             }
         }
         // 2) 兜底强杀
@@ -256,7 +333,7 @@ impl crate::agents::AgentRuntime for NativeAgentRuntime {
             let _ = child.wait();
         }
         inner.stdin = None;
-        inner.stdout = None;
+        inner.lines = None;
         tracing::info!("DeepHarness Worker 已停止");
         Ok(())
     }
@@ -269,7 +346,7 @@ impl crate::agents::AgentRuntime for NativeAgentRuntime {
                     let reason = format!("Worker 进程退出: {status}");
                     inner.child = None;
                     inner.stdin = None;
-                    inner.stdout = None;
+                    inner.lines = None;
                     inner.last_error = Some(reason.clone());
                     crate::agents::AgentStatus::Crashed { reason }
                 }
@@ -373,5 +450,22 @@ mod tests {
     #[test]
     fn request_timeout_constant_is_sane() {
         assert!(REQUEST_TIMEOUT >= Duration::from_secs(1));
+        assert!(LONG_REQUEST_TIMEOUT > REQUEST_TIMEOUT, "长任务超时应更宽松");
+    }
+
+    #[test]
+    fn timeout_mapping_by_request_kind() {
+        // 长任务走宽松超时，控制类请求走 30 秒
+        assert_eq!(timeout_for("run_task"), LONG_REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("plan"), LONG_REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("ping"), REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("configure"), REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("recall"), REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("未知类型"), REQUEST_TIMEOUT);
+    }
+
+    #[test]
+    fn stale_response_budget_is_small_and_positive() {
+        assert!(MAX_STALE_RESPONSES >= 1 && MAX_STALE_RESPONSES <= 32);
     }
 }

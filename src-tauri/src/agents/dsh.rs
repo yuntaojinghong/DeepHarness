@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
-// lib 构建中 wait_ready 为死代码(仅测试使用), 但测试构建需要此 trait 导入
+// lib 构建下本 trait 仅测试用到（测试通过 trait 方法读取 status），故显式放行
 #[allow(unused_imports)]
 use crate::agents::AgentRuntime;
 use crate::error::{AppError, AppResult};
@@ -86,18 +86,6 @@ impl DshRuntime {
                 }
             }
         }
-    }
-
-    /// 轮询 TCP 端口等待服务就绪。
-    fn wait_ready(deadline_ms: u64) -> bool {
-        let start = std::time::Instant::now();
-        while (start.elapsed().as_millis() as u64) < deadline_ms {
-            if port_alive(DSH_PORT) {
-                return true;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-        false
     }
 
     /// 端口是否存活（健康检查）。
